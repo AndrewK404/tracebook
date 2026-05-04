@@ -84,12 +84,13 @@
         contextUsed: d.contextUsed || 0, categories: [],
       };
 
-      // Build CONTEXT_ITEMS from what we know from the session
+      // Build CONTEXT_ITEMS — prefer real parsed data from /api/sessions/{id}
+      const ci = d.contextItems || {};
       window.CONTEXT_ITEMS = {
-        agents: [],
-        skills: [],
-        mcp: (window.MCP_SERVERS || []).map(m => ({ name: m.name, tokens: 1200, tools: m.tools || 0 })),
-        memory: [],
+        agents:  ci.agents  || [],
+        skills:  ci.skills  || [],
+        mcp:     (ci.mcp || []).map(m => ({ name: m.name, tokens: 1200, tools: m.tools || 0, calls: m.calls || 0 })),
+        memory:  (ci.memory || []).map(m => ({ name: (m.path || '').split('/').slice(-2).join('/'), path: m.path })),
         systemTools: [
           { name: 'Bash',       tokens: 4200 },
           { name: 'Edit',       tokens: 3100 },

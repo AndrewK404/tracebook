@@ -86,7 +86,35 @@ function SettingsScreen() {
         </section>
 
         <section>
-          <Eyebrow num={4} label="pricing" meta="$ per 1M tokens" />
+          <Eyebrow num={4} label="cost calculation" meta="how the dashboard's $ values are computed" />
+          <Card>
+            <div className="space-y-4 text-[12.5px]" style={{ color: 'var(--ink-2)', lineHeight: 1.65 }}>
+              <p>
+                Tracebook reads each <span className="font-mono" style={{ color: 'var(--ink-1)' }}>assistant</span> event's <span className="font-mono" style={{ color: 'var(--ink-1)' }}>message.usage</span> object directly from the JSONL transcript. There is no API call and no estimation — every dollar is the sum of token counts that Anthropic's API actually reported, multiplied by the per-token rate from the table below.
+              </p>
+              <div className="surface-2 p-4 font-mono text-[12px]" style={{ background: 'var(--bg-0)', color: 'var(--ink-1)' }}>
+                <div style={{ color: '#6ee7b7' }}># for each assistant turn</div>
+                <div>cost = (input_tokens             × input_rate)</div>
+                <div>     + (output_tokens            × output_rate)</div>
+                <div>     + (cache_creation_input     × cache_write_rate)</div>
+                <div>     + (cache_read_input         × cache_read_rate)</div>
+                <div>     ÷ 1,000,000</div>
+              </div>
+              <ul className="space-y-2 pl-4 list-disc" style={{ color: 'var(--ink-2)' }}>
+                <li><span style={{ color: 'var(--ink-1)' }}>input_tokens</span> — uncached input. Full price.</li>
+                <li><span style={{ color: 'var(--ink-1)' }}>output_tokens</span> — generated tokens. Highest rate.</li>
+                <li><span style={{ color: 'var(--ink-1)' }}>cache_creation_input_tokens</span> — first time a prefix is sent with cache control. Charged at <strong>1.25×</strong> the input rate.</li>
+                <li><span style={{ color: 'var(--ink-1)' }}>cache_read_input_tokens</span> — re-used cached prefix on subsequent requests. Charged at <strong>0.10×</strong> the input rate. The cache-read ratio on the dashboard tells you how much of your input is hitting this cheap path.</li>
+              </ul>
+              <p style={{ color: 'var(--ink-3)', fontSize: '11.5px' }}>
+                Source of truth: <span className="font-mono">tracebook/pricing.py</span> and <span className="font-mono">tracebook/parsers/claude.py</span>. Rates below match Anthropic's published list prices as of {about.version || 'v0.1.0'}.
+              </p>
+            </div>
+          </Card>
+        </section>
+
+        <section>
+          <Eyebrow num={5} label="pricing" meta="$ per 1M tokens" />
           <Card padding="p-0">
             <table className="w-full text-[12.5px]">
               <thead><tr className="t-eyebrow border-b" style={{ borderColor: 'var(--line-0)' }}>
@@ -99,9 +127,9 @@ function SettingsScreen() {
               <tbody className="divide-y font-mono" style={{ borderColor: 'var(--line-0)' }}>
                 {(window.PRICING || []).map(p => (
                   <tr key={p.model} className="hover-row">
-                    <td className="px-4 py-3 text-zinc-200">{p.model}</td>
-                    <td className="px-4 py-3 text-right num text-zinc-200">${p.input.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right num text-zinc-200">${p.output.toFixed(2)}</td>
+                    <td className="px-4 py-3" style={{ color: 'var(--ink-1)' }}>{p.model}</td>
+                    <td className="px-4 py-3 text-right num" style={{ color: 'var(--ink-1)' }}>${p.input.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right num" style={{ color: 'var(--ink-1)' }}>${p.output.toFixed(2)}</td>
                     <td className="px-4 py-3 text-right num" style={{ color: 'var(--ink-3)' }}>${p.cacheWrite.toFixed(2)}</td>
                     <td className="px-4 py-3 text-right num text-emerald-300">${p.cacheRead.toFixed(2)}</td>
                   </tr>
@@ -112,7 +140,7 @@ function SettingsScreen() {
         </section>
 
         <section>
-          <Eyebrow num={5} label="about" />
+          <Eyebrow num={6} label="about" />
           <Card>
             <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-[12.5px] font-mono max-w-md">
               {[

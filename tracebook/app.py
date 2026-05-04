@@ -229,6 +229,14 @@ def _session_detail(s: Session) -> dict:
 
     # Context budget estimation
     summary["contextBudget"] = _build_context_budget(s)
+
+    # Observed extras (skills / sub-agents / mcp / memory)
+    summary["contextItems"] = {
+        "agents":  s.sub_agents,
+        "skills":  s.skills_used,
+        "mcp":     s.mcp_tools_used,
+        "memory":  [{"path": p} for p in s.memory_reads],
+    }
     return summary
 
 
@@ -252,20 +260,24 @@ def _node_dict(n: TraceNode) -> dict:
 def _build_context_budget(s: Session) -> dict:
     used = s.context_used
     max_ctx = s.context_max or 200_000
+    if used > max_ctx:                       # never exceed 100% used
+        max_ctx = max(max_ctx, used)
 
     # Heuristic breakdown — real per-category data requires CLAUDE.md parsing
-    system_tools = min(used // 8, 22400)
-    messages = max(used - system_tools - 9500 - 2100, 0)
+    system_prompt = 9500
+    mcp_tools = 2100 if not s.mcp_tools_used else 2100 + 800 * len(s.mcp_tools_used)
+    system_tools = min(max(used // 8, 4000), 22400)
+    messages = max(used - system_tools - system_prompt - mcp_tools, 0)
 
     return {
         "model": s.model,
         "contextMax": max_ctx,
         "contextUsed": used,
         "categories": [
-            {"key": "system_prompt",  "label": "system prompt",      "tokens": 9500,        "color": "#34d399"},
-            {"key": "system_tools",   "label": "system tools",       "tokens": system_tools, "color": "#6ee7b7"},
-            {"key": "mcp_tools",      "label": "mcp tools",          "tokens": 2100,        "color": "#67e8f9"},
-            {"key": "messages",       "label": "messages",           "tokens": messages,    "color": "#7dd3fc"},
+            {"key": "system_prompt",  "label": "system prompt",      "tokens": system_prompt, "color": "#34d399"},
+            {"key": "system_tools",   "label": "system tools",       "tokens": system_tools,  "color": "#6ee7b7"},
+            {"key": "mcp_tools",      "label": "mcp tools",          "tokens": mcp_tools,     "color": "#67e8f9"},
+            {"key": "messages",       "label": "messages",           "tokens": messages,      "color": "#7dd3fc"},
         ],
     }
 

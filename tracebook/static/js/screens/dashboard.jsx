@@ -69,7 +69,7 @@ function BarChart({ data }) {
             <g key={i}>
               <line x1={P.l} x2={W - P.r} y1={yy} y2={yy} stroke="#1f1f24" strokeDasharray="2 4" />
               <text x={P.l - 8} y={yy + 3} fill="#52525b" fontSize="9.5" fontFamily="JetBrains Mono" textAnchor="end">
-                {(max * p / 1e6).toFixed(2)}M
+                {window.formatNum(max * p, { digits: 2 })}
               </text>
             </g>
           );
@@ -120,12 +120,12 @@ function BarChart({ data }) {
       {cur && (
         <div className="absolute top-3 left-12 surface-2 px-3 py-2.5 pointer-events-none" style={{ minWidth: 180 }}>
           <div className="t-eyebrow mb-1.5">{cur.today ? 'today' : cur.day}</div>
-          <div className="display-tight font-semibold text-[18px] text-zinc-100 num leading-none mb-1">{(cur.total/1e6).toFixed(2)}M</div>
+          <div className="display-tight font-semibold text-[18px] num leading-none mb-1" style={{ color: 'var(--ink-0)' }}>{window.formatNum(cur.total, { digits: 2 })}</div>
           <div className="t-meta mb-2.5" style={{ fontSize: '10.5px' }}>${cur.cost.toFixed(2)} · total tokens</div>
           <div className="space-y-1 text-[11px] font-mono">
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#34d399' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">opus</span><span className="num text-zinc-200">{(cur.opus/1e3).toFixed(0)}k</span></div>
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#7dd3fc' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">sonnet</span><span className="num text-zinc-200">{(cur.sonnet/1e3).toFixed(0)}k</span></div>
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#a78bfa' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">haiku</span><span className="num text-zinc-200">{(cur.haiku/1e3).toFixed(0)}k</span></div>
+            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#34d399' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">opus</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.opus)}</span></div>
+            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#7dd3fc' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">sonnet</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.sonnet)}</span></div>
+            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#a78bfa' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">haiku</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.haiku)}</span></div>
           </div>
         </div>
       )}
@@ -159,26 +159,27 @@ function CachePanel() {
         <div>
           <div className="flex items-center gap-1.5 t-eyebrow mb-2">
             cache read ratio
-            <span className="text-zinc-600 text-[10px]">ⓘ</span>
+            <span title="cache_read_input_tokens / total input tokens. Higher = more reuse of cached prompts → cheaper requests." style={{ color: 'var(--ink-4)', fontSize: '10px', cursor: 'help' }}>ⓘ</span>
           </div>
-          <div className="display-tight font-semibold text-[44px] text-zinc-100 num leading-none">
-            {(readRatio * 100).toFixed(1)}<span className="text-[24px] text-zinc-500">%</span>
+          <div className="display-tight font-semibold text-[44px] num leading-none" style={{ color: 'var(--ink-0)' }}>
+            {(readRatio * 100).toFixed(1)}<span className="text-[24px]" style={{ color: 'var(--ink-4)' }}>%</span>
           </div>
-          <div className="t-meta mt-1.5" style={{ fontSize: '10.5px' }}>vs previous period</div>
+          <div className="t-meta mt-1.5 flex items-center gap-1.5" style={{ fontSize: '10.5px' }}>
+            <span style={{ color: '#6ee7b7' }}>higher is better</span>
+            <span style={{ color: 'var(--ink-4)' }}>·</span>
+            <span>cached reads cost ~10% of fresh input</span>
+          </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <span className="chip chip-emerald num">▲ 32.6%</span>
           <Sparkline data={SERIES} w={140} h={42} color="#34d399" />
         </div>
       </div>
-
-      <div className="t-meta mb-3" style={{ fontSize: '10.5px' }}>data as of may 3, 11pm · updates hourly</div>
 
       {/* breakdown */}
       <div className="surface-2 p-4">
         <div className="flex items-center justify-between mb-3">
           <span className="text-[12.5px] text-zinc-200 font-medium">cache usage breakdown</span>
-          <span className="font-mono num text-zinc-300 text-[11.5px]">{(total/1e6).toFixed(2)}M input</span>
+          <span className="font-mono num text-[11.5px]" style={{ color: 'var(--ink-2)' }}>{window.formatNum(total, { digits: 2 })} input</span>
         </div>
         {/* composition bar */}
         <div className="h-3 rounded overflow-hidden flex" style={{ background: 'var(--bg-0)' }}>
@@ -199,12 +200,18 @@ function CachePanel() {
         {/* metrics row */}
         <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t" style={{ borderColor: 'var(--line-0)' }}>
           <div>
-            <div className="t-eyebrow mb-1">read ratio</div>
-            <div className="display-tight font-semibold text-[18px] text-zinc-100 num">{(readRatio*100).toFixed(1)}%</div>
+            <div className="t-eyebrow mb-1 flex items-center gap-1">
+              read ratio
+              <span title="cache_read / (uncached + cache_write + cache_read). Reads cost 10% of fresh input." style={{ color: 'var(--ink-4)', cursor: 'help', fontSize: '9px' }}>ⓘ</span>
+            </div>
+            <div className="display-tight font-semibold text-[18px] num" style={{ color: 'var(--ink-0)' }}>{(readRatio*100).toFixed(1)}%</div>
           </div>
           <div>
-            <div className="t-eyebrow mb-1">write amort.</div>
-            <div className="display-tight font-semibold text-[18px] text-zinc-100 num">{writeAmort}<span className="text-zinc-500 text-[12px]">×</span></div>
+            <div className="t-eyebrow mb-1 flex items-center gap-1">
+              write amort.
+              <span title="cache_read / cache_write. Each write is amortized across N reads. Higher = each cache slot is reused more." style={{ color: 'var(--ink-4)', cursor: 'help', fontSize: '9px' }}>ⓘ</span>
+            </div>
+            <div className="display-tight font-semibold text-[18px] num" style={{ color: 'var(--ink-0)' }}>{writeAmort}<span className="text-[12px]" style={{ color: 'var(--ink-4)' }}>×</span></div>
           </div>
         </div>
       </div>
@@ -218,6 +225,19 @@ const PIE_COLORS = ['#34d399', '#7dd3fc', '#a78bfa', '#fbbf24', '#fb7185', '#67e
 
 function ProjectPie({ rows }) {
   const [hover, setHover] = useStateD(null);
+  const totalAll = rows.reduce((a, r) => a + r.cost, 0);
+
+  // Group slices < 2% into "other" to declutter
+  const big = rows.filter(r => r.cost / totalAll >= 0.02);
+  const small = rows.filter(r => r.cost / totalAll < 0.02);
+  if (small.length > 1) {
+    const otherCost   = small.reduce((a, r) => a + r.cost, 0);
+    const otherTokens = small.reduce((a, r) => a + r.tokens, 0);
+    rows = [...big, { project: `other (${small.length})`, cost: otherCost, tokens: otherTokens, sessions: small.reduce((a,r)=>a+(r.sessions||0),0) }];
+  } else {
+    rows = [...big, ...small];
+  }
+
   const total = rows.reduce((a, r) => a + r.cost, 0);
   const tokensTotal = rows.reduce((a, r) => a + r.tokens, 0);
   const cx = 100, cy = 100, r = 80, ri = 52;
@@ -259,7 +279,7 @@ function ProjectPie({ rows }) {
             {cur ? `${(cur.portion * 100).toFixed(1)}%` : `$${total.toFixed(0)}`}
           </text>
           <text x={cx} y={cy + 28} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill="var(--ink-4)">
-            {cur ? `$${cur.cost.toFixed(2)}` : `${(tokensTotal/1e6).toFixed(1)}M tokens`}
+            {cur ? `$${cur.cost.toFixed(2)}` : `${window.formatNum(tokensTotal)} tokens`}
           </text>
         </svg>
       </div>
@@ -277,7 +297,7 @@ function ProjectPie({ rows }) {
               <span className="font-mono text-[12.5px] truncate" style={{ minWidth: 0, flex: '1 1 auto', color: 'var(--ink-1)' }}>{s.project}</span>
               {/* hover-only details */}
               <span className="font-mono num text-[10.5px] text-right tabular"
-                style={{ color: 'var(--ink-3)', minWidth: isHover ? 44 : 0, width: isHover ? 'auto' : 0, overflow: 'hidden', transition: 'width 120ms', opacity: isHover ? 1 : 0 }}>{(s.tokens/1e6).toFixed(1)}M</span>
+                style={{ color: 'var(--ink-3)', minWidth: isHover ? 44 : 0, width: isHover ? 'auto' : 0, overflow: 'hidden', transition: 'width 120ms', opacity: isHover ? 1 : 0 }}>{window.formatNum(s.tokens)}</span>
               <span className="font-mono num text-[11px] text-right tabular"
                 style={{ color: '#6ee7b7', minWidth: isHover ? 50 : 0, width: isHover ? 'auto' : 0, overflow: 'hidden', transition: 'width 120ms', opacity: isHover ? 1 : 0 }}>${s.cost.toFixed(2)}</span>
               {/* always-visible share */}
@@ -302,37 +322,43 @@ function DashboardScreen() {
   const [model, setModel] = useStateD('all');
   const [period, setPeriod] = useStateD('14');
   const [refreshKey, setRefreshKey] = useStateD(0);
+  const [loading, setLoading] = useStateD(false);
 
   const dash = window._DASHBOARD;
   const kpis = dash ? dash.kpis : null;
 
-  // Format token number for KPI display
-  function fmtTokens(n) {
-    if (!n) return '0';
-    if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(0) + 'k';
-    return String(n);
-  }
+  const fmtTokens = (n) => window.formatNum(n);
 
   const handleRefresh = async () => {
     if (window.fetchDashboard) {
+      setLoading(true);
       await window.fetchDashboard(period, provider, model);
+      setLoading(false);
       setRefreshKey(k => k + 1);
     }
   };
+
+  // Auto-refresh on filter change
+  React.useEffect(() => {
+    handleRefresh();
+  }, [provider, model, period]);
 
   const totalTokens = kpis ? fmtTokens(kpis.tokens.value) : '—';
   const totalCost   = kpis ? '$' + kpis.cost.value.toFixed(2) : '—';
   const sessions    = kpis ? kpis.sessions.value : 0;
   const avgCost     = kpis ? '$' + kpis.avg_cost.value.toFixed(2) : '—';
   const periodLabel = period === 'all' ? 'all time' : `prev ${period}d`;
+  // Concrete date ranges for the "vs prev" tooltip
+  const periodDays  = period === 'all' ? 90 : Number(period);
+  const currentRange  = window.formatDateRange ? window.formatDateRange(0, periodDays) : '';
+  const previousRange = window.formatDateRange ? window.formatDateRange(periodDays, periodDays) : '';
+  const deltaTooltip  = `Comparing ${currentRange} (current) vs ${previousRange} (previous ${periodDays} days)`;
 
   const chart = window.CHART_14D || [];
   const pie   = window.TOKENS_BY_PROJECT || [];
 
   return (
-    <div className="fade-up" key={refreshKey}>
+    <div className="fade-up">
       <PageHeader
         eyebrow="dashboards / overview"
         title="overview"
@@ -350,10 +376,10 @@ function DashboardScreen() {
 
       {/* KPI strip */}
       <div className="grid grid-cols-4 gap-4 mb-7">
-        <KPIBlock label="tokens" value={totalTokens} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} spark={window.SPARK_TOKENS} sparkColor="#7dd3fc" />
-        <KPIBlock label="sessions" value={String(sessions)} delta={kpis ? kpis.sessions.delta : null} deltaLabel={`vs ${periodLabel}`} spark={window.SPARK_SESSIONS} sparkColor="#a78bfa" />
-        <KPIBlock label="estimated cost" value={totalCost} delta={kpis ? kpis.cost.delta : null} deltaLabel={`vs ${periodLabel}`} spark={window.SPARK_COST} accent />
-        <KPIBlock label="avg / session" value={avgCost} delta={kpis ? kpis.avg_cost.delta : null} deltaLabel={`vs ${periodLabel}`} sparkColor="#fbbf24" />
+        <KPIBlock label="tokens" value={totalTokens} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_TOKENS} sparkColor="#7dd3fc" />
+        <KPIBlock label="sessions" value={String(sessions)} delta={kpis ? kpis.sessions.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_SESSIONS} sparkColor="#a78bfa" />
+        <KPIBlock label="estimated cost" value={totalCost} delta={kpis ? kpis.cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_COST} accent />
+        <KPIBlock label="avg / session" value={avgCost} delta={kpis ? kpis.avg_cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} sparkColor="#fbbf24" />
       </div>
 
       {/* Throughput bar chart */}
@@ -399,17 +425,17 @@ function DashboardScreen() {
           <tbody className="divide-y" style={{ borderColor: 'var(--line-0)' }}>
             {(dash && dash.recent ? dash.recent : (window.SESSIONS || []).slice(0, 5)).map(s => (
               <tr key={s.id} className="hover-row cursor-pointer" onClick={() => window.location.hash = `#/sessions/${s.id}`}>
-                <td className="px-4 py-3 font-mono">
+                <td className="px-4 py-3.5 font-mono">
                   <div className="flex items-center gap-2">
                     {s.live ? <StatusDot kind="emerald" pulse size={5} /> : <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--ink-4)' }} />}
-                    <span className="text-zinc-200">{s.short}</span>
+                    <span style={{ color: 'var(--ink-2)' }}>{s.short}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 truncate max-w-[320px]" style={{ color: 'var(--ink-1)' }}>{s.preview}</td>
-                <td className="px-4 py-3 t-meta">{s.project}</td>
-                <td className="px-4 py-3 text-right font-mono num text-zinc-200">{s.turns}</td>
-                <td className="px-4 py-3 text-right font-mono num text-emerald-300">${s.cost.toFixed(2)}</td>
-                <td className="px-4 py-3 text-right t-meta">{s.last}</td>
+                <td className="px-4 py-3.5 truncate max-w-[320px]" style={{ color: 'var(--ink-1)' }}>{s.preview}</td>
+                <td className="px-4 py-3.5 t-meta" style={{ color: 'var(--ink-3)' }}>{s.project}</td>
+                <td className="px-4 py-3.5 text-right font-mono num" style={{ color: 'var(--ink-3)' }}>{s.turns}</td>
+                <td className="px-4 py-3.5 text-right font-mono num text-emerald-300">${s.cost.toFixed(2)}</td>
+                <td className="px-4 py-3.5 text-right t-meta" style={{ color: 'var(--ink-4)' }}>{s.last}</td>
               </tr>
             ))}
           </tbody>

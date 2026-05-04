@@ -40,8 +40,8 @@ function groupByProject(rows) {
 // ─── shared row renderers ────────────────────────────────────────────────────
 
 function CompactRow({ s, density, showModel, showBranch }) {
-  const py = density === 'tight' ? 'py-2.5' : density === 'cozy' ? 'py-3.5' : 'py-4';
-  const cols = `120px 1fr ${showBranch ? '180px' : '140px'} ${showModel ? '110px' : ''} 60px 80px 70px`.replace(/\s+/g, ' ').trim();
+  const py = density === 'tight' ? 'py-3' : density === 'cozy' ? 'py-4' : 'py-5';
+  const cols = `110px 1fr ${showBranch ? '160px' : '130px'} ${showModel ? '110px' : ''} 60px 80px 70px`.replace(/\s+/g, ' ').trim();
   return (
     <li
       onClick={() => window.location.hash = `#/sessions/${s.id}`}
@@ -51,22 +51,22 @@ function CompactRow({ s, density, showModel, showBranch }) {
         {s.live
           ? <StatusDot kind="emerald" pulse size={5} />
           : <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--ink-4)' }} />}
-        <span className="text-zinc-200 group-hover:text-zinc-50 transition-colors text-[12.5px]">{s.short}</span>
+        <span className="group-hover:text-zinc-50 transition-colors text-[12.5px]" style={{ color: 'var(--ink-2)' }}>{s.short}</span>
       </div>
       <div className="truncate text-[13px] leading-[1.45]" style={{ color: 'var(--ink-1)' }}>{s.preview}</div>
       <div className="t-meta truncate">
-        <span className="text-zinc-300">{s.project}</span>
+        <span style={{ color: 'var(--ink-3)' }}>{s.project}</span>
         {showBranch && <span style={{ color: 'var(--ink-4)' }}> · {s.branch}</span>}
       </div>
       {showModel && (
         <div className="font-mono text-[11.5px] truncate flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-sm flex-shrink-0" style={{ background: modelTone(s.model) }} />
-          <span style={{ color: 'var(--ink-2)' }}>{modelShort(s.model)}</span>
+          <span style={{ color: 'var(--ink-3)' }}>{modelShort(s.model)}</span>
         </div>
       )}
-      <div className="text-right font-mono num text-[12.5px] text-zinc-300">{s.turns}</div>
+      <div className="text-right font-mono num text-[12.5px]" style={{ color: 'var(--ink-3)' }}>{s.turns}</div>
       <div className="text-right font-mono num text-[12.5px] text-emerald-300">${s.cost.toFixed(2)}</div>
-      <div className="text-right t-meta">{s.last}</div>
+      <div className="text-right t-meta" style={{ color: 'var(--ink-4)' }}>{s.last}</div>
     </li>
   );
 }
@@ -169,8 +169,13 @@ function SessionsScreen() {
     || s.project.toLowerCase().includes(q.toLowerCase())
   );
 
-  const projects = [...new Set(window.SESSIONS.map(s => s.project))];
+  // Top projects ranked by session count
+  const projectCounts = {};
+  window.SESSIONS.forEach(s => { projectCounts[s.project] = (projectCounts[s.project] || 0) + 1; });
+  const projects = Object.entries(projectCounts).sort((a, b) => b[1] - a[1]).map(([p]) => p);
   const liveCount = window.SESSIONS.filter(s => s.live).length;
+  const [showAllProjects, setShowAllProjects] = useStateS(false);
+  const projectsToShow = showAllProjects ? projects : projects.slice(0, 6);
 
   const layoutLabel = {
     compact: '01 / table · dense',
@@ -211,9 +216,20 @@ function SessionsScreen() {
         </window.Pill>
         <window.Pill active={filter === 'today'} onClick={() => setFilter('today')}>today</window.Pill>
         <div className="h-4 w-px" style={{ background: 'var(--line-1)' }} />
-        {projects.map(p => (
-          <window.Pill key={p} active={filter === p} onClick={() => setFilter(p)}>{p}</window.Pill>
+        {projectsToShow.map(p => (
+          <window.Pill key={p} active={filter === p} onClick={() => setFilter(p)}>
+            {p} <span style={{ color: 'var(--ink-4)', marginLeft: 4 }}>{projectCounts[p]}</span>
+          </window.Pill>
         ))}
+        {projects.length > 6 && (
+          <button
+            onClick={() => setShowAllProjects(v => !v)}
+            className="text-[11.5px] font-mono px-2 py-1 rounded transition-colors"
+            style={{ color: 'var(--ink-3)' }}
+          >
+            {showAllProjects ? '− collapse' : `+ ${projects.length - 6} more`}
+          </button>
+        )}
       </div>
 
       {/* Layout banner — hint for variant currently shown */}

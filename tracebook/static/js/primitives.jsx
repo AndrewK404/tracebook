@@ -2,6 +2,38 @@
 
 const { useState, useEffect, useMemo, useRef } = React;
 
+// ─── Number formatting ───────────────────────────────────────────────────────
+// formatNum(n, opts?) — auto picks k/M/B/T units. Used everywhere tokens or
+// large counts are displayed so a chart never shows "598035k".
+//   formatNum(950) → "950"
+//   formatNum(12_500) → "12.5k"
+//   formatNum(2_100_000) → "2.1M"
+//   formatNum(2_100_000_000) → "2.1B"
+function formatNum(n, opts = {}) {
+  if (n == null || isNaN(n)) return '0';
+  const sign = n < 0 ? '-' : '';
+  const abs = Math.abs(n);
+  const digits = opts.digits != null ? opts.digits : 1;
+  if (abs < 1_000)             return sign + abs.toFixed(0);
+  if (abs < 1_000_000)         return sign + (abs / 1_000).toFixed(digits) + 'k';
+  if (abs < 1_000_000_000)     return sign + (abs / 1_000_000).toFixed(digits) + 'M';
+  if (abs < 1_000_000_000_000) return sign + (abs / 1_000_000_000).toFixed(digits) + 'B';
+  return sign + (abs / 1_000_000_000_000).toFixed(digits) + 'T';
+}
+window.formatNum = formatNum;
+
+// ─── Date formatting ─────────────────────────────────────────────────────────
+// formatDateRange(daysBack, daysSpan) → "Apr 27 → May 4"
+function formatDateRange(daysBack, daysSpan) {
+  const end = new Date();
+  end.setDate(end.getDate() - daysBack);
+  const start = new Date(end);
+  start.setDate(start.getDate() - daysSpan + 1);
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `${fmt(start)} → ${fmt(end)}`;
+}
+window.formatDateRange = formatDateRange;
+
 // ─── Hash router ─────────────────────────────────────────────────────────────
 
 function useHashRoute() {
@@ -93,27 +125,31 @@ window.Sparkline = Sparkline;
 
 // ─── KPI Block ───────────────────────────────────────────────────────────────
 
-function KPIBlock({ label, value, unit, delta, deltaLabel, spark, sparkColor = '#34d399', accent = false, sub }) {
+function KPIBlock({ label, value, unit, delta, deltaLabel, deltaTooltip, spark, sparkColor = '#34d399', accent = false, sub }) {
   const deltaTone = delta > 0 ? 'delta-up' : delta < 0 ? 'delta-down' : 'delta-flat';
   const deltaArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '–';
   return (
     <div className={`surface-1 p-5 relative overflow-hidden ${accent ? 'kpi-accent' : ''}`}>
       <div className="t-eyebrow mb-4">{label}</div>
-      <div className="flex items-end justify-between">
-        <div>
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <div className="t-kpi">
             {value}
-            {unit && <span className="text-[18px] text-zinc-500 font-medium ml-1">{unit}</span>}
+            {unit && <span className="text-[18px] font-medium ml-1" style={{ color: 'var(--ink-4)' }}>{unit}</span>}
           </div>
           {(delta !== undefined || sub) && (
-            <div className="flex items-center gap-2 mt-2 text-[11.5px] font-mono">
+            <div className="flex items-center gap-1.5 mt-2 text-[11px] font-mono whitespace-nowrap">
               {delta !== undefined && (
                 <span className={`${deltaTone} num`}>
                   {deltaArrow} {Math.abs(delta).toFixed(1)}%
                 </span>
               )}
-              {deltaLabel && <span className="text-zinc-500">{deltaLabel}</span>}
-              {sub && <span className="text-zinc-500">{sub}</span>}
+              {deltaLabel && (
+                <span style={{ color: 'var(--ink-4)', cursor: deltaTooltip ? 'help' : 'default' }} title={deltaTooltip || ''}>
+                  {deltaLabel}
+                </span>
+              )}
+              {sub && <span style={{ color: 'var(--ink-4)' }}>{sub}</span>}
             </div>
           )}
         </div>

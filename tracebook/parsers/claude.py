@@ -95,6 +95,12 @@ class Session:
     # transcript — raw structured turns for the transcript tab
     transcript: list[dict[str, Any]] = field(default_factory=list)
 
+    # observed extras parsed from JSONL (used by context-window panel)
+    sub_agents: list[dict[str, Any]] = field(default_factory=list)   # Task tool calls
+    skills_used: list[dict[str, Any]] = field(default_factory=list)  # Skill / SkillRunner calls
+    mcp_tools_used: list[dict[str, Any]] = field(default_factory=list)  # mcp__server__tool calls
+    memory_reads: list[str] = field(default_factory=list)            # CLAUDE.md / .claude memory paths
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -214,6 +220,15 @@ def parse_session(path: Path) -> Optional[Session]:
     transcript_turns: list[dict] = []
     context_used = context_max = 0
 
+    # extras (skills / sub-agents / mcp / memory)
+    sub_agents: list[dict] = []
+    skills_used: list[dict] = []
+    mcp_tools_used: list[dict] = []
+    memory_reads: list[str] = []
+    seen_subagent_keys: set[str] = set()
+    seen_skill_keys: set[str] = set()
+    seen_mcp_keys: set[str] = set()
+
     # For timing the trace nodes we need ordered timestamps
     # We'll use event positions as a proxy for relative time
     node_list: list[dict] = []   # lightweight node dicts, built into TraceNode later
@@ -300,14 +315,16 @@ def parse_session(path: Path) -> Optional[Session]:
             )
             if ctx_used > context_used:
                 context_used = ctx_used
-                # guess context_max from model name
+                # guess context_max from model name + observed usage
                 m = model.lower()
                 if "gemini" in m or "1m" in m:
                     context_max = 1_000_000
                 elif "gpt" in m or "o1" in m or "o3" in m or "o4" in m:
                     context_max = 128_000
                 else:
-                    context_max = 200_000  # all current Claude models
+                    # Claude: default 200k, but if the user actually exceeded 200k
+                    # they have the 1M context flag enabled (Sonnet/Opus 1M tier)
+                    context_max = 1_000_000 if ctx_used > 200_000 else 200_000
 
             # collect content blocks
             content = msg.get("content", [])
@@ -321,7 +338,7 @@ def parse_session(path: Path) -> Optional[Session]:
                 elif btype == "tool_use":
                     tid = block.get("id", f"tu_{idx}")
                     tool_name = _tool_name(block)
-                    inp = block.get("input", {})
+                    inp = block.get("input", {}) or {}
                     inp_preview = ""
                     if isinstance(inp, dict):
                         # meaningful preview: command, pattern, file_path, etc.
@@ -334,6 +351,47 @@ def parse_session(path: Path) -> Optional[Session]:
                             inp_preview = str(first_val)[:100]
                     pending_tools[tid] = {"name": tool_name, "input_preview": inp_preview, "ts_idx": idx}
                     last_action = tool_name
+
+                    # ── classify: sub-agent / skill / MCP ─────────────────────
+                    if tool_name == "Task" and isinstance(inp, dict):
+                        sa = inp.get("subagent_type") or "general-purpose"
+                        if sa not in seen_subagent_keys:
+                            seen_subagent_keys.add(sa)
+                            sub_agents.append({"name": sa, "calls": 1, "description": (inp.get("description") or "")[:80]})
+                        else:
+                            for s in sub_agents:
+                                if s["name"] == sa:
+                                    s["calls"] = s.get("calls", 0) + 1
+                                    break
+                    elif tool_name == "Skill" and isinstance(inp, dict):
+                        sk = inp.get("skill") or inp.get("name") or "?"
+                        if sk not in seen_skill_keys:
+                            seen_skill_keys.add(sk)
+                            skills_used.append({"name": sk, "calls": 1})
+                        else:
+                            for s in skills_used:
+                                if s["name"] == sk:
+                                    s["calls"] = s.get("calls", 0) + 1
+                                    break
+                    elif tool_name.startswith("mcp__"):
+                        # mcp__servername__toolname → group by server
+                        parts = tool_name.split("__", 2)
+                        server = parts[1] if len(parts) >= 2 else "?"
+                        if server not in seen_mcp_keys:
+                            seen_mcp_keys.add(server)
+                            mcp_tools_used.append({"name": server, "calls": 1, "tools": {tool_name}})
+                        else:
+                            for s in mcp_tools_used:
+                                if s["name"] == server:
+                                    s["calls"] = s.get("calls", 0) + 1
+                                    s["tools"].add(tool_name)
+                                    break
+
+                    # ── detect memory reads (CLAUDE.md or .claude/ memory files) ─
+                    if tool_name == "Read" and isinstance(inp, dict):
+                        fp = str(inp.get("file_path", ""))
+                        if ("CLAUDE.md" in fp or "/.claude/" in fp or "/memory/" in fp) and fp not in memory_reads:
+                            memory_reads.append(fp)
 
             if text_parts:
                 transcript_turns.append({
@@ -375,6 +433,11 @@ def parse_session(path: Path) -> Optional[Session]:
     # Produce one assistant node per turn, children = tool calls in that turn
     trace_nodes = _build_trace(events, model)
 
+    # serialize mcp tools set → count for JSON
+    for s in mcp_tools_used:
+        if isinstance(s.get("tools"), set):
+            s["tools"] = len(s["tools"])
+
     return Session(
         id=session_id,
         short=short,
@@ -402,6 +465,10 @@ def parse_session(path: Path) -> Optional[Session]:
         trace_nodes=trace_nodes,
         tool_calls=tool_calls,
         transcript=transcript_turns,
+        sub_agents=sub_agents,
+        skills_used=skills_used,
+        mcp_tools_used=mcp_tools_used,
+        memory_reads=memory_reads,
     )
 
 

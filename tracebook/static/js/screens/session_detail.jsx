@@ -2,18 +2,35 @@
 
 const { useState: useStateSD } = React;
 
+// Abbreviate long absolute paths: keep `~` and last 2 segments:
+//   /Users/andrew/vs_code_projects/ai_business/tracebook → ~/…/ai_business/tracebook
+function abbreviateCwd(p) {
+  if (!p) return '';
+  let s = p;
+  // Strip /Users/<name>/ → ~/
+  s = s.replace(/^\/Users\/[^/]+\//, '~/');
+  s = s.replace(/^\/home\/[^/]+\//, '~/');
+  const parts = s.split('/').filter(Boolean);
+  if (parts.length <= 4) return s;
+  return `${parts[0]}/…/${parts.slice(-2).join('/')}`;
+}
+
 // ─── Donut for context budget ────────────────────────────────────────────────
 
 function ContextDonut({ used, max, categories }) {
   const r = 64, c = 2 * Math.PI * r;
-  const usedPct = used / max;
+  // Effective max: never let the donut exceed 100% — if used > max the user
+  // must be on a 1M tier we didn't detect, so widen the denominator.
+  const effMax = Math.max(max, used, 1);
+  const usedPct = Math.min(1, used / effMax);
   let acc = 0;
   const segs = categories.map((cat) => {
     const start = acc;
-    const portion = cat.tokens / max;
+    const portion = Math.min(1 - acc, Math.max(0, cat.tokens / effMax));
     acc += portion;
     return { ...cat, start, portion };
   });
+  const fmtMax = max >= 1e6 ? `${(max/1e6).toFixed(1)}M` : `${(max/1000).toFixed(0)}k`;
   return (
     <svg width="170" height="170" viewBox="0 0 170 170">
       <circle cx="85" cy="85" r={r} fill="none" stroke="var(--bg-0)" strokeWidth="14" />
@@ -24,7 +41,7 @@ function ContextDonut({ used, max, categories }) {
       ))}
       <text x="85" y="80" textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9.5" fill="var(--ink-3)">used</text>
       <text x="85" y="98" textAnchor="middle" fontFamily="Inter Tight" fontWeight="600" fontSize="22" letterSpacing="-0.02em" fill="#f4f4f5">{Math.round(usedPct * 100)}%</text>
-      <text x="85" y="113" textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill="var(--ink-4)">{(used/1000).toFixed(1)}k / {max >= 1e6 ? `${(max/1e6).toFixed(1)}M` : `${(max/1000).toFixed(0)}k`}</text>
+      <text x="85" y="113" textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill="var(--ink-4)">{window.formatNum(used)} / {fmtMax}</text>
     </svg>
   );
 }
@@ -32,7 +49,10 @@ function ContextDonut({ used, max, categories }) {
 function ContextPanel({ sessionId }) {
   const ctx = window.CONTEXT_BUDGET;
   const free = ctx.contextMax - ctx.contextUsed;
-  const cats = [...ctx.categories, { key: 'free', label: 'free', tokens: free, color: '#27272a', glyph: 'database' }];
+  // Only show a "free" slice when there genuinely is free capacity left
+  const cats = free > 0
+    ? [...ctx.categories, { key: 'free', label: 'free', tokens: free, color: '#27272a', glyph: 'database' }]
+    : ctx.categories;
 
   return (
     <div className="grid grid-cols-12 gap-5">
@@ -43,14 +63,18 @@ function ContextPanel({ sessionId }) {
             <ContextDonut used={ctx.contextUsed} max={ctx.contextMax} categories={ctx.categories} />
           </div>
           <div className="space-y-1.5 text-[11.5px] font-mono">
-            {cats.map(cat => (
-              <div key={cat.key} className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: cat.color }} />
-                <span className="flex-1 text-zinc-300">{cat.label}</span>
-                <span className="num text-zinc-200">{(cat.tokens/1000).toFixed(1)}k</span>
-                <span className="num w-12 text-right" style={{ color: 'var(--ink-4)' }}>{((cat.tokens/ctx.contextMax)*100).toFixed(1)}%</span>
-              </div>
-            ))}
+            {cats.map(cat => {
+              const denom = Math.max(ctx.contextMax, ctx.contextUsed, 1);
+              const pct = Math.max(0, (cat.tokens / denom) * 100);
+              return (
+                <div key={cat.key} className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: cat.color }} />
+                  <span className="flex-1" style={{ color: 'var(--ink-2)' }}>{cat.label}</span>
+                  <span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cat.tokens)}</span>
+                  <span className="num w-12 text-right" style={{ color: 'var(--ink-4)' }}>{pct.toFixed(1)}%</span>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -309,12 +333,18 @@ function RunMeta({ session }) {
       <div className="surface-2 p-4 space-y-3">
         <div>
           <div className="t-eyebrow mb-1.5">cwd</div>
-          <div className="font-mono text-[12px] text-zinc-100">{session.cwd}</div>
+          <div
+            className="font-mono text-[11px]"
+            title={session.cwd}
+            style={{ color: 'var(--ink-1)', wordBreak: 'break-all', lineHeight: 1.45 }}
+          >
+            {abbreviateCwd(session.cwd)}
+          </div>
           <div className="t-meta mt-0.5" style={{ fontSize: '10.5px' }}>{session.branch}</div>
         </div>
         <div className="border-t pt-3" style={{ borderColor: 'var(--line-0)' }}>
           <div className="t-eyebrow mb-1.5">model</div>
-          <div className="font-mono text-[12px] text-zinc-100">{session.model}</div>
+          <div className="font-mono text-[12px]" style={{ color: 'var(--ink-1)' }}>{session.model}</div>
           <div className="t-meta mt-0.5" style={{ fontSize: '10.5px' }}>provider · {session.provider}</div>
         </div>
       </div>
@@ -458,9 +488,11 @@ function SessionDetailScreen({ id }) {
 
       {tab === 'transcript' && (
         <Card padding="p-6">
-          <div className="space-y-5 font-mono text-[12.5px]">
+          <div className="space-y-6 font-mono text-[13px]" style={{ maxWidth: 760 }}>
             {(() => {
-              const turns = (window._SESSION_DETAIL && window._SESSION_DETAIL.transcript) || [];
+              // Drop empty turns (tool-only with no text)
+              const turns = ((window._SESSION_DETAIL && window._SESSION_DETAIL.transcript) || [])
+                .filter(t => t.text && t.text.trim().length > 0);
               if (turns.length === 0) {
                 return (
                   <div className="text-center py-8" style={{ color: 'var(--ink-4)' }}>
@@ -469,16 +501,29 @@ function SessionDetailScreen({ id }) {
                   </div>
                 );
               }
-              return turns.map((t, i) => {
+              // Merge consecutive same-role turns to reduce visual noise
+              const merged = [];
+              for (const t of turns) {
+                const last = merged[merged.length - 1];
+                if (last && last.role === t.role) {
+                  last.text = `${last.text}\n\n${t.text}`;
+                } else {
+                  merged.push({ ...t });
+                }
+              }
+              return merged.map((t, i) => {
                 const isUser = t.role === 'user';
                 return (
-                  <div key={i}>
-                    {isUser ? (
-                      <div className="chip chip-emerald mb-1.5">user</div>
-                    ) : (
-                      <div className="chip mb-1.5" style={{ background: 'rgba(52,211,153,0.06)', borderColor: 'rgba(52,211,153,0.3)', color: '#6ee7b7' }}>assistant</div>
-                    )}
-                    <p className={`leading-relaxed whitespace-pre-wrap ${isUser ? 'text-zinc-200' : 'text-zinc-300'}`}>{t.text}</p>
+                  <div key={i} className={isUser ? '' : 'border-l-2 pl-4'} style={isUser ? {} : { borderColor: 'rgba(52,211,153,0.25)' }}>
+                    <div className="flex items-center gap-2 mb-2">
+                      {isUser ? (
+                        <span className="chip chip-emerald">user</span>
+                      ) : (
+                        <span className="chip" style={{ background: 'rgba(52,211,153,0.06)', borderColor: 'rgba(52,211,153,0.3)', color: '#6ee7b7' }}>assistant</span>
+                      )}
+                      {t.ts && <span className="t-meta" style={{ fontSize: '10px' }}>{new Date(t.ts).toLocaleString()}</span>}
+                    </div>
+                    <p className="leading-[1.65] whitespace-pre-wrap" style={{ color: isUser ? 'var(--ink-1)' : 'var(--ink-2)' }}>{t.text}</p>
                   </div>
                 );
               });
