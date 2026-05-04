@@ -1,34 +1,10 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
 .venv/
-.env
-.python-version
-
-# Build artifacts
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+*.egg-info/
 dist/
 build/
-*.egg
-
-# Tooling
-.ruff_cache/
 .pytest_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
-*.swp
-
-# Local tracebook data (if user creates it)
-~/.tracebook/
-
-# Lock file (we ship one, but ignore stray copies in subdirs)
-*.lock~
+uv.lock

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tracebook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans:    ['Inter', 'ui-sans-serif', 'system-ui'],
+          display: ['"Inter Tight"', 'Inter', 'ui-sans-serif'],
+          mono:    ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        },
+      }
+    }
+  }
+</script>
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body class="min-h-screen flex">
+
+<div id="root" class="flex-1 flex">
+  <!-- Loading placeholder until data is fetched -->
+  <div id="loading" class="flex-1 flex items-center justify-center" style="background:var(--bg-0)">
+    <div class="text-center font-mono" style="color:var(--ink-4)">
+      <div class="text-[13px] mb-2">tracebook</div>
+      <div class="text-[11px]">loading sessions…</div>
+    </div>
+  </div>
+</div>
+
+<!-- React + Babel CDN -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js"
+  integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L"
+  crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"
+  integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm"
+  crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js"
+  integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y"
+  crossorigin="anonymous"></script>
+
+<!-- Tweaks defaults -->
+<script>
+  window.__TWEAKS = {
+    "sessionLayout": "compact",
+    "rowDensity": "comfortable",
+    "showModel": true,
+    "showBranch": true,
+    "zebra": false
+  };
+</script>
+
+<!-- Data (async fetch from /api/*) -->
+<script type="text/babel" src="/static/js/data.jsx"></script>
+
+<!-- React components — all loaded statically; app.jsx waits for tracebook:ready -->
+<script type="text/babel" src="/static/js/tweaks-panel.jsx"></script>
+<script type="text/babel" src="/static/js/icons.jsx"></script>
+<script type="text/babel" src="/static/js/primitives.jsx"></script>
+<script type="text/babel" src="/static/js/shell.jsx"></script>
+<script type="text/babel" src="/static/js/screens/dashboard.jsx"></script>
+<script type="text/babel" src="/static/js/screens/sessions.jsx"></script>
+<script type="text/babel" src="/static/js/screens/session_detail.jsx"></script>
+<script type="text/babel" src="/static/js/screens/settings.jsx"></script>
+<script type="text/babel" src="/static/js/app.jsx"></script>
+
+</body>
+</html>

@@ -1,135 +1,113 @@
-# tracebook · architecture
+# tracebook — architecture
 
-Single Python process. Two background pieces: an HTTP server (FastAPI) and
-a filesystem watcher (watchdog). Everything reads from `~/.claude/projects/`
-and never writes back.
+Single Python process, no DB, no build step. Filesystem is the ABI.
 
 ## Topology
 
 ```
-┌────────────────┐                    ┌──────────────────────────┐
-│   You          │                    │   Browser                │
-│  (terminal)    │                    │  127.0.0.1:4178          │
-└───────┬────────┘                    └────────────┬─────────────┘
-        │ runs                                     │ HTTP
-        ▼                                          │
-┌────────────────┐                    ┌────────────▼─────────────┐
-│ claude / codex │  appends JSONL     │   tracebook (uvicorn)    │
-│  CLI session   │ ──────────────────►│                          │
-└────────────────┘                    │  ┌────────────────────┐  │
-                                      │  │  watcher.py        │  │
-            ~/.claude/projects/       │  │  watchdog.Observer │  │
-                    │                 │  └─────────┬──────────┘  │
-                    └────────────────►│            │ invalidates │
-                                      │  ┌─────────▼──────────┐  │
-                                      │  │  store.py          │  │
-                                      │  │  in-memory index   │  │
-                                      │  └─────────┬──────────┘  │
-                                      │            │             │
-                                      │  ┌─────────▼──────────┐  │
-                                      │  │  app.py (FastAPI)  │  │
-                                      │  │  Jinja2 routes     │  │
-                                      │  └────────────────────┘  │
-                                      └──────────────────────────┘
+┌──────────────────┐                                 ┌─────────────────────────┐
+│  claude / codex  │  appends JSONL                  │   tracebook (FastAPI)   │
+│  CLI (your sub)  │ ───────────────────►            │                         │
+└──────────────────┘   ~/.claude/projects/           │   ┌─────────────────┐   │
+                                  │                  │   │  FS Watcher     │   │
+                                  └─────────────────►│   │  (watchdog)     │   │
+                                                     │   └────────┬────────┘   │
+                                                     │            │            │
+                                                     │   ┌────────▼────────┐   │
+                                                     │   │  Store          │   │
+                                                     │   │  (read-only,    │   │
+                                                     │   │   mtime-cached) │   │
+                                                     │   └────────┬────────┘   │
+                                                     │            │            │
+                                                     │   ┌────────▼────────┐   │
+                                                     │   │  HTTP routes    │◄──┼── browser
+                                                     │   │  (FastAPI +     │   │   http://127.0.0.1:4178
+                                                     │   │   Jinja2 +      │   │
+                                                     │   │   JSON API)     │   │
+                                                     │   └─────────────────┘   │
+                                                     └─────────────────────────┘
 ```
 
 ## Modules
 
-### `parsers/claude.py`
-
-Pure function: `parse_session(path: Path) -> Session`.
-
-- Reads the JSONL line by line. Tolerates malformed lines (skipped, not
-  raised).
-- Groups raw events into logical `Turn`s:
-  - A `user` event → `Turn(kind="user")`. If its content is a list of
-    `tool_result` blocks, it becomes `kind="tool_result"`.
-  - An `assistant` event → `Turn(kind="assistant")`. Walks the content
-    blocks: `text` → `text`; `thinking` → `thinking`; `tool_use` →
-    appended to `tool_calls`. The assistant's `usage` is captured.
-- Skips housekeeping events (`permission-mode`, `file-history-snapshot`,
-  `last-prompt`, `queue-operation`, `attachment`).
-- Computes per-turn cost from the `usage` block and the pricing table
-  for the session's model.
-
-### `store.py`
-
-Module-level cache keyed by absolute path → `Session`. Public surface:
-
-```python
-list_sessions() -> list[Session]    # newest first
-get_session(session_id) -> Session  # raises LookupError on miss
-get_kpis() -> Kpis                  # totals for the dashboard
-get_projects() -> list[ProjectChip] # cwd → session count
-top_prompts(window: str = "today", n: int = 5) -> list[PromptCost]
-daily_cost_series(days: int = 14) -> list[DailyCost]
+```
+tracebook/
+├── __main__.py        uv run tracebook entry point
+├── app.py             FastAPI app, routes, JSON API
+├── settings.py        paths, port, pricing defaults
+├── store.py           read-only filesystem session index
+├── watcher.py         watchdog observer, invalidates store cache
+├── pricing.py         model → $/1M tokens, cost calculator
+├── parsers/
+│   └── claude.py      JSONL → typed Session / Trace
+├── templates/
+│   └── index.html     SPA shell — bootstraps the React design
+└── static/
+    ├── css/app.css    extracted from claude-design <style>
+    └── js/            JSX modules served by Babel-standalone
+        ├── icons.jsx
+        ├── primitives.jsx
+        ├── shell.jsx
+        ├── tweaks-panel.jsx
+        ├── data.jsx          ← rewritten to fetch from /api/*
+        ├── app.jsx
+        └── screens/
+            ├── dashboard.jsx
+            ├── sessions.jsx
+            ├── session_detail.jsx
+            └── settings.jsx
 ```
 
-Index is rebuilt lazily — on read if the index is empty, or after the
-watcher pushes an invalidation. We never re-parse a file unless its
-`mtime` has changed.
+## Why a "React in the browser" shell
 
-### `watcher.py`
+The design ships as a self-contained React + Babel + Tailwind-CDN page.
+Reproducing it 1:1 in Jinja2 would lose fidelity and double the work.
+Instead:
 
-Wraps `watchdog.Observer`. Watches `~/.claude/projects/` recursively,
-debounces filesystem events to 200ms, and calls `store.invalidate(path)`
-for each touched JSONL.
+- The Python server owns parsing, indexing, and pricing.
+- The browser owns rendering, exactly as drawn in the design.
+- The two communicate over a small JSON API (six endpoints).
+- There is still **no build step**: Babel transpiles JSX in the browser
+  (the same way the design demo runs).
 
-Falls back to a poll-based `PollingObserver` on platforms where the
-native FS notifier is unreliable (containers, network mounts).
+This keeps the design source of truth one-to-one with what ships, while
+keeping the server logic in Python.
 
-### `app.py`
+## Data flow
 
-FastAPI + Jinja2. Routes:
+1. On startup, `Store.refresh()` walks `~/.claude/projects/`, parses
+   every `*.jsonl` once, and builds an in-memory `dict[session_id, Session]`.
+2. `Watcher` registers with watchdog; on `created` / `modified` events it
+   invalidates the cached `Session` for the file mtime that changed.
+3. HTTP requests hit `Store` directly. Reads are O(1) (dict) for summaries
+   and O(file) for full session detail (trace + transcript).
+4. Browser fetches `/api/*` JSON, populates `window.SESSIONS` etc., and
+   the React design renders.
 
-| Method | Path                | Renders                                      |
-|--------|---------------------|----------------------------------------------|
-| GET    | `/`                 | `dashboard.html`                             |
-| GET    | `/sessions`         | `sessions.html`                              |
-| GET    | `/sessions/{id}`    | `session_detail.html`                        |
-| GET    | `/cost`             | `cost.html`                                  |
-| GET    | `/api/sessions`     | JSON for refresh / scripting                 |
-| GET    | `/healthz`          | `{"ok": true}` for liveness                  |
-| GET    | `/static/*`         | tiny CSS file                                |
+## File-system layout
 
-### `settings.py`
+```
+~/.claude/projects/                    (Claude Code writes; we only read)
+└── -Users-andrew-vs-code-...
+    └── <session-uuid>.jsonl           ← one session per file
 
-Centralizes:
+~/.tracebook/                          (tracebook writes — optional)
+├── pricing.json                       ← user override of model pricing (future)
+└── settings.json                      ← user UI preferences (future)
+```
 
-- `CLAUDE_PROJECTS = Path.home() / ".claude" / "projects"`
-- `TRACEBOOK_HOME = Path.home() / ".tracebook"`
-- `HOST = "127.0.0.1"`, `PORT = 4178`
-- `PRICING` table (Claude Sonnet/Opus/Haiku) with override from
-  `~/.tracebook/pricing.json` if present.
+In v0.1 the only state tracebook needs is in memory; the `~/.tracebook/`
+directory is created lazily and remains empty by default.
 
-## Request flow (a single page render)
+## Configuration
 
-1. Browser hits `GET /sessions`.
-2. `app.py` calls `store.list_sessions()`.
-3. `store` checks if the index is empty → walks
-   `~/.claude/projects/**/*.jsonl`, parses each via
-   `parsers.claude.parse_session`, caches by path.
-4. Returns a list sorted by `last_activity_at desc`.
-5. `app.py` hands the list to Jinja and renders `sessions.html`.
-6. While the user reads, the watcher receives an FS event for the active
-   session. It calls `store.invalidate(path)`. The next request re-parses
-   only that file.
+- Port: `127.0.0.1:4178` — fixed in v0.1, override via `TRACEBOOK_PORT`.
+- Claude projects path: `~/.claude/projects/` — override via `TRACEBOOK_CLAUDE_PROJECTS`.
+- All other config is on disk.
 
-## Why this shape
+## Roadmap (post v0.1)
 
-- **Filesystem is the ABI.** Anyone can `cat`, `git diff`, or back up the
-  data tracebook works on. No magic state we own.
-- **One process.** `uv run tracebook` is the entire deployment. No daemon
-  manager, no service file, no second binary.
-- **Read-only.** A bug in tracebook can't corrupt a Claude session.
-- **No model API calls.** Tracebook never hits `api.anthropic.com`. All
-  inference is the user's CLI against the user's subscription.
-
-## Roadmap
-
-- v1.0 — Sessions, Cost, Trace view (this release).
-- v1.1 — Codex parser (`~/.codex/sessions/`) sharing the same `Session`
-  shape.
-- v1.2 — Live SSE updates for the trace view (replaces the 5s poll).
-- v1.3 — Search across sessions (`ripgrep` shelling out is fine).
-- v2.0 — Becomes the read layer of [Leibniz](https://github.com/AndrewK404/leibniz-platform).
+- v0.2 — server-sent events for live trace updates without polling.
+- v0.3 — Codex / Gemini / Aider CLI adapters.
+- v0.4 — `tracebook-memory` MCP server, exposing user-curated memory files.
+- v1.0 — opt-in SQLite + sqlite-vec for cross-session search.

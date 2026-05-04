@@ -1,128 +1,160 @@
-# tracebook · v1 spec
+# tracebook — product spec
 
-> A read-only dashboard for the JSONL transcripts your local agent CLIs
-> already write to disk. v1 is intentionally narrow: parse, index, display.
+Local read-only dashboard for Claude Code (and, later, other CLI agents).
+Parses `~/.claude/projects/**/*.jsonl` and renders the design described in
+`claude-design/Leibniz v0.4.2 redesign.html` and `design.pdf`.
 
-## Problem
+This is **v0.1** — the first shippable surface. It eventually grows into
+Leibniz; here it is one self-contained product.
 
-When you use Claude Code, Codex, or any modern agent CLI, every turn is
-appended to a JSONL file in your home directory. That file is the truth —
-but it is not pleasant to read. There is no "what did I do today",
-no "how much did this cost", no fast way to revisit a long session and find
-the moment a tool ran.
+## Non-negotiables
 
-The official CLIs render the *current* session beautifully, but everything
-*past* the current REPL is just a flat file. Existing OSS dashboards
-(`claude-usage`, `token-dashboard`) are good at numbers but skip the
-trace view; trace viewers (`cctrace`) are good at one session but skip
-the index.
+1. **Read-only.** Tracebook never writes inside `~/.claude/`.
+2. **No model API calls.** No `anthropic`, no `openai`, no token proxying.
+3. **No build step.** Tailwind via CDN, Babel-standalone for the JSX, plain
+   HTML served by FastAPI + Jinja2.
+4. **No database.** In-memory index, invalidated by the filesystem watcher.
+5. **English-only artifacts.** Commits, comments, docstrings.
+6. **Empty states are instructive** — every empty surface shows the exact
+   filesystem path the user must populate.
 
-Tracebook does both, in one screen language, with one binary, locally.
+## Screens
 
-## Scope (v1)
+The four screens are taken directly from `claude-design/`. The HTML/JSX
+files in `claude-design/src/` define every pixel; the server reproduces
+them and supplies real data.
 
-In scope:
+### 1. Dashboard `#/dashboard`
 
-| Surface             | What it shows                                                       |
-|---------------------|---------------------------------------------------------------------|
-| Dashboard `/`       | KPI strip · "active now" card · recent sessions · projects chips    |
-| Sessions `/sessions`| Sortable list — id, cwd, turns, cost, started, last activity        |
-| Trace `/sessions/:id`| Turn-by-turn transcript with structured tool blocks + per-turn cost |
-| Cost `/cost`        | KPI strip · 14-day daily chart · top 5 expensive prompts            |
-| `GET /api/sessions` | JSON for refresh / scripting                                        |
+- Page header: eyebrow `dashboards / overview`, title `overview`, subtitle.
+- Filter bar: provider · model · period (`7d / 14d / 30d / 90d / 180d / all`).
+- KPI strip (4 columns): tokens, sessions, estimated cost, avg/session.
+  Each KPI carries a sparkline and a delta vs the previous period.
+- Throughput chart: stacked-bar, one bar per day in the selected period,
+  segments per model family (opus / sonnet / haiku).
+- Prompt-caching panel: cache-read ratio, composition bar
+  (uncached / write-5m / write-1h / read), small read/write metrics.
+- Tokens-by-project: donut + legend, share of spend.
+- Recent activity: 5 most recent sessions in a table (session, preview,
+  project, turns, cost, last) — each row links to the session detail.
 
-Out of scope (v1 — these belong to Leibniz):
+### 2. Sessions `#/sessions`
 
-- HITL approval inbox
-- MCP memory server
-- Workflow YAML runner
-- Multi-user, auth, OAuth
-- Live SSE updates (we re-poll every 5s in v1)
-- Codex / Gemini parsers (interface is ready, only Claude shipped)
-- Editing — tracebook is **read-only**
+- Page header with `open in claude code` button.
+- Search input + filter pills: `all`, `live`, `today`, project pills.
+- Layout banner showing the active variant.
+- Five layout variants exposed via the tweaks panel:
+  `compact` (table) · `cards` · `stacked` · `projects` · `timeline`.
+- Footer line: `N of M sessions · ~/.claude/projects/`.
+- Empty state when no `*.jsonl` files exist: instructs the user to run
+  `claude` against any project, listing the watched directory.
 
-## Non-functional
+### 3. Session detail `#/sessions/{id}`
 
-- **Local-first.** Binds to `127.0.0.1` only.
-- **Read-only.** Tracebook never writes to `~/.claude/`.
-- **No build step.** Tailwind via CDN, Inter via rsms.me, plain Jinja.
-- **Cold start < 500ms** on a 200-session corpus.
-- **No DB.** Index is computed in-memory and invalidated by the watcher.
-- **Apache 2.0.**
+Three tabs at the top: `trace` (default) · `context window` · `transcript`.
 
-## UX commitments
+- **Trace tab** (default):
+  - Three-column grid: `RunMeta` (status, cwd, branch, model, tokens,
+    tools used, cost) · trace tree or waterfall · `Inspector` (input /
+    output / attributes / raw tabs).
+  - Trace tree shows a depth-indented call tree.
+  - Waterfall mode shows the same nodes on a time axis.
+  - Live sessions show a pulsing emerald dot and "live" badges.
+- **Context window tab**:
+  - Donut showing `used / max` with categorical breakdown (system prompt,
+    system tools, mcp tools, custom agents, memory, skills, messages,
+    autocompact buffer).
+  - "What's in context" cards per category (custom agents, skills, mcp
+    servers, memory files) listing the actual files + token counts.
+  - "System tools" grid listing every Claude Code system tool with
+    estimated token cost.
+- **Transcript tab**:
+  - Linear chronological view of user/assistant turns with embedded
+    tool calls, edits, and a live status pill if the session is in flight.
 
-1. **Every empty state is instructive.** It tells the user the exact
-   filesystem path to fix it. (`~/.claude/projects/` has nothing? Then the
-   empty state names that path and explains.)
-2. **Numbers are tabular.** Always `font-variant-numeric: tabular-nums`
-   so columns line up.
-3. **Mono for IDs and paths.** Sans for prose. Never mix in one cell.
-4. **One accent color** (emerald) for "live / present / OK". One warn
-   (amber) for awaiting state. One error (rose) for failures.
-5. **No spinners.** This is local data; everything is instant. Show the
-   data or show a structured empty state — never an indeterminate loader.
+### 4. Settings `#/settings`
 
-## Data model
+- Filesystem paths (state db, policy, audit log, memory, claude
+  transcripts, pricing) — display only in v0.1.
+- Hooks: registered hook table (PreToolUse, PostToolUse, Stop,
+  SessionStart) with status + call counts. v0.1 reads
+  `~/.claude/settings.json` if present, otherwise displays "not
+  registered".
+- MCP servers: lists configured servers from `~/.claude/settings.json`
+  if present.
+- Pricing: editable-looking table of current `$/1M tokens`. v0.1 is
+  read-only display sourced from `tracebook/pricing.py`.
+- About: version, commit, claude code version detected, python
+  version, license, daemon status.
 
-A `Session` is one JSONL file. A `Turn` is a logical step in the
-conversation reconstructed from the file's events:
+## Data layer / JSON API
 
-```python
-Session(
-  id: str                     # UUID, the filename without .jsonl
-  cwd: str                    # decoded from the parent directory name
-  project_name: str           # last segment of cwd
-  source_path: Path           # absolute path to the JSONL file
-  size_bytes: int
-  turns: list[Turn]
-  started_at: datetime
-  last_activity_at: datetime
-  is_live: bool               # mtime within last 60s
-  model: str | None
-  total_cost_usd: float
-  total_input_tokens: int
-  total_output_tokens: int
-  total_cache_read_tokens: int
-  total_cache_write_tokens: int
-  tool_counts: dict[str, int] # {"Read": 12, "Bash": 7, ...}
-  first_user_prompt: str | None  # for list previews
-)
+Every screen reads from JSON endpoints. No SSR of mutable state.
 
-Turn(
-  index: int
-  kind: Literal["user", "assistant", "tool_result", "system"]
-  timestamp: datetime
-  text: str | None              # extracted prose (for user/assistant)
-  thinking: str | None          # extended thinking blocks
-  tool_calls: list[ToolCall]    # zero or more
-  tool_result: ToolResult | None
-  usage: Usage | None           # only for assistant turns
-  cost_usd: float
-)
+| Path                                          | Returns                                             |
+|-----------------------------------------------|-----------------------------------------------------|
+| `GET /api/sessions`                           | array of session summaries (newest first)           |
+| `GET /api/sessions/{id}`                      | full session: meta, trace nodes, context budget     |
+| `GET /api/dashboard?period=14&provider=&model=` | KPIs, chart series, project pie, recent activity  |
+| `GET /api/settings`                           | hooks, mcp servers, pricing, paths                  |
+| `GET /api/health`                             | `{ ok: true, sessions: <count> }`                   |
 
-ToolCall(name, input, id)
-ToolResult(tool_use_id, content, is_error)
-Usage(input, output, cache_read, cache_write)
+Session summary:
+```jsonc
+{
+  "id": "01HXKQ3F8M2P9NTQVZWX4D",
+  "short": "01HXKQ3F",
+  "preview": "first user-message excerpt",
+  "cwd": "/Users/.../code/leibniz-platform",
+  "project": "leibniz-platform",
+  "branch": "feat/policy-engine",
+  "turns": 47,
+  "cost": 1.84,
+  "duration": "2h 14m",
+  "started": "2h ago",
+  "last": "now",
+  "live": true,
+  "status": "running",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5",
+  "lastAction": "edit leibniz/store.py +12 −3",
+  "tokensIn": 124180,
+  "tokensOut": 32040,
+  "cacheWrite": 18420,
+  "cacheRead": 428890,
+  "contextUsed": 253600,
+  "contextMax": 1000000
+}
 ```
 
-## Pricing
+Trace node:
+```jsonc
+{
+  "id": "n42",
+  "type": "assistant" | "llm" | "tool" | "skill" | "mcp",
+  "name": "claude-sonnet-4-5 · synthesize",
+  "start": 2620,
+  "duration": 4900,
+  "tokens": 6800,
+  "cost": 0.022,
+  "depth": 1,
+  "parent": "a1",
+  "live": false,
+  "preview": "leibniz/store.py +12 −3"
+}
+```
 
-`tracebook/settings.py` ships a default `PRICING` table for current Claude
-Sonnet/Opus/Haiku rates. User overrides via `~/.tracebook/pricing.json`
-(falls back to bundled defaults if missing).
+## Acceptance criteria for v0.1
 
-## Acceptance
-
-v1 is done when:
-
-- `uv run tracebook` starts on `127.0.0.1:4178` and indexes every
-  Claude Code session within 1 second of cold start.
-- Every screen renders without a console error, on a fresh corpus and
-  on an empty corpus.
-- Every empty state names the exact filesystem path to fix it.
-- A session opened mid-stream by Claude Code shows up as live within
-  10 seconds.
-- The four screens look like the design mockups — same palette, spacing,
-  typography, and rhythm.
-- Total Python source ≤ 1500 lines (parser + app + store + watcher).
+- `uv run tracebook` starts the server on `127.0.0.1:4178` with no errors.
+- Visiting `/` redirects to `#/dashboard` and shows real data sourced from
+  `~/.claude/projects/`.
+- Every session in `~/.claude/projects/` is listed on `/sessions`.
+- Clicking any session opens `/sessions/{id}` and renders the trace tab
+  with at least one assistant node and one tool call.
+- The waterfall mode renders without overflow and aligns the time grid.
+- The context window tab shows the donut + breakdown without errors when
+  data is incomplete (graceful zero-state).
+- Settings shows the real paths and detected pricing table.
+- An empty `~/.claude/projects/` shows the empty state with the exact path.
+- No console errors in any screen.

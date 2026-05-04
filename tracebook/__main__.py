@@ -1,45 +1,33 @@
-"""`uv run tracebook` — start the local dashboard."""
-
-from __future__ import annotations
-
-import argparse
+import uvicorn
+from tracebook.app import app
+from tracebook.settings import settings
+from tracebook.store import store
+from tracebook.watcher import start_watcher
 import logging
 
-import uvicorn
-
-from tracebook import __version__
-from tracebook.settings import HOST, PORT
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)-5s %(message)s",
+    datefmt="%H:%M:%S",
+)
+log = logging.getLogger("tracebook")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        prog="tracebook",
-        description="Local dashboard for Claude Code session transcripts.",
-    )
-    parser.add_argument("--host", default=HOST, help=f"bind host (default: {HOST})")
-    parser.add_argument("--port", type=int, default=PORT, help=f"bind port (default: {PORT})")
-    parser.add_argument("--reload", action="store_true", help="hot-reload on code changes (dev)")
-    parser.add_argument(
-        "--version",
-        action="version",
-        version=f"tracebook {__version__}",
-    )
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s  %(message)s",
-        datefmt="%H:%M:%S",
-    )
-    print(f"tracebook · http://{args.host}:{args.port}")
-    uvicorn.run(
-        "tracebook.app:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-        log_level="info",
-        access_log=False,
-    )
+    store.refresh()
+    log.info("tracebook · http://%s:%d", settings.host, settings.port)
+    log.info("watching %s · %d sessions indexed", settings.claude_projects, len(store.sessions))
+    observer = start_watcher()
+    try:
+        uvicorn.run(
+            app,
+            host=settings.host,
+            port=settings.port,
+            log_level="warning",
+        )
+    finally:
+        observer.stop()
+        observer.join()
 
 
 if __name__ == "__main__":

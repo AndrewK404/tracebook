@@ -1,373 +1,418 @@
-"""FastAPI app: server-rendered HTML for every screen."""
-
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+import sys
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 
-from tracebook import __version__, store
-from tracebook.parsers.claude import Session, Turn
-from tracebook.settings import CLAUDE_PROJECTS_DIR, TRACEBOOK_HOME
-from tracebook.watcher import start_watcher
+from tracebook import __version__
+from tracebook.parsers.claude import Session, TraceNode
+from tracebook.pricing import PRICING, compute_cost
+from tracebook.settings import settings
+from tracebook.store import store
 
-THIS_DIR = Path(__file__).resolve().parent
-TEMPLATE_DIR = THIS_DIR / "templates"
-STATIC_DIR = THIS_DIR / "static"
+app = FastAPI(title="tracebook", version=__version__)
 
+# Static files
+app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 
-# ---------------------------------------------------------------------------
-# Jinja filters
-# ---------------------------------------------------------------------------
-
-
-def _ago(value: datetime | None, now: datetime | None = None) -> str:
-    if value is None:
-        return "—"
-    now = now or datetime.now(timezone.utc)
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    delta = (now - value).total_seconds()
-    if delta < 0:
-        return "just now"
-    if delta < 5:
-        return "just now"
-    if delta < 60:
-        return f"{int(delta)}s ago"
-    if delta < 3600:
-        return f"{int(delta // 60)}m ago"
-    if delta < 86400:
-        return f"{int(delta // 3600)}h ago"
-    if delta < 86400 * 2:
-        return "yesterday"
-    if delta < 86400 * 7:
-        return f"{int(delta // 86400)}d ago"
-    return value.strftime("%Y-%m-%d")
+# Jinja2
+_jinja = Environment(loader=FileSystemLoader(str(settings.templates_dir)), autoescape=True)
 
 
-def _money(value: float | int | None) -> str:
-    if value is None:
-        return "$0.00"
-    return f"${float(value):,.2f}"
+# ─── HTML shell ───────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def index() -> HTMLResponse:
+    tmpl = _jinja.get_template("index.html")
+    return HTMLResponse(tmpl.render(version=__version__))
 
 
-def _money_fine(value: float | int | None) -> str:
-    """Three-decimal money for very small per-turn costs."""
-    if value is None:
-        return "$0.00"
-    f = float(value)
-    if abs(f) < 0.01:
-        return f"${f:.4f}"
-    return f"${f:,.2f}"
+# ─── JSON API ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/health")
+async def health() -> dict:
+    return {"ok": True, "sessions": len(store.sessions), "version": __version__}
 
 
-def _commas(value: int | float | None) -> str:
-    if value is None:
-        return "0"
-    return f"{int(value):,}"
+@app.get("/api/sessions")
+async def api_sessions() -> JSONResponse:
+    sessions = store.list_sessions()
+    return JSONResponse([_session_summary(s) for s in sessions])
 
 
-def _short_path(value: str, max_len: int = 64) -> str:
-    """Shorten a filesystem path by collapsing leading segments with `…/`,
-    while preserving the final segment in full."""
-    if not value:
-        return ""
-    if len(value) <= max_len:
-        return value
-    parts = value.split("/")
-    if len(parts) <= 2:
-        return "…" + value[-(max_len - 1):]
-    last = parts[-1]
-    # Walk back from the end, accumulating segments until we'd overflow.
-    out = last
-    for seg in reversed(parts[:-1]):
-        candidate = seg + "/" + out
-        if len(candidate) + 2 > max_len:  # 2 for "…/"
-            return "…/" + out
-        out = candidate
-    return out
+@app.get("/api/sessions/{session_id}")
+async def api_session_detail(session_id: str) -> JSONResponse:
+    sess = store.get_session(session_id)
+    if not sess:
+        raise HTTPException(404, f"session {session_id!r} not found")
+    return JSONResponse(_session_detail(sess))
 
 
-def _humanize_bytes(n: int | None) -> str:
-    if not n:
-        return "0 B"
-    for unit in ("B", "KB", "MB", "GB"):
-        if n < 1024:
-            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
-        n /= 1024  # type: ignore[assignment]
-    return f"{n:.1f} TB"
+@app.get("/api/dashboard")
+async def api_dashboard(
+    period: str = "14",
+    provider: str = "all",
+    model: str = "all",
+) -> JSONResponse:
+    all_sessions = store.list_sessions()
 
-
-def _short_id(value: str) -> str:
-    if not value:
-        return ""
-    return value.split("-", 1)[0][:8].upper()
-
-
-def _tojson(value: Any) -> str:
-    try:
-        return json.dumps(value, indent=2, ensure_ascii=False)
-    except (TypeError, ValueError):
-        return str(value)
-
-
-# ---------------------------------------------------------------------------
-# App factory
-# ---------------------------------------------------------------------------
-
-
-def create_app() -> FastAPI:
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):  # noqa: ARG001
-        observer = start_watcher()
+    # Apply period filter
+    now = datetime.now(tz=timezone.utc)
+    if period != "all":
         try:
-            yield
-        finally:
-            if observer is not None:
-                observer.stop()
-                observer.join(timeout=2.0)
+            days = int(period)
+            cutoff = now - timedelta(days=days)
+            filtered = [s for s in all_sessions if s.last_at and s.last_at >= cutoff]
+        except ValueError:
+            filtered = all_sessions
+    else:
+        filtered = all_sessions
 
-    app = FastAPI(title="tracebook", version=__version__, lifespan=lifespan)
-    templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-    templates.env.filters["ago"] = _ago
-    templates.env.filters["money"] = _money
-    templates.env.filters["money_fine"] = _money_fine
-    templates.env.filters["commas"] = _commas
-    templates.env.filters["short_path"] = _short_path
-    templates.env.filters["humanize_bytes"] = _humanize_bytes
-    templates.env.filters["short_id"] = _short_id
-    templates.env.filters["tojson_pretty"] = _tojson
+    # Apply provider/model filters
+    if provider != "all":
+        filtered = [s for s in filtered if s.provider == provider]
+    if model != "all":
+        filtered = [s for s in filtered if model.lower() in s.model.lower()]
 
-    if STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    # Previous period for delta
+    if period != "all":
+        try:
+            days = int(period)
+            prev_cutoff = now - timedelta(days=days * 2)
+            prev_filtered = [
+                s for s in all_sessions
+                if s.last_at and prev_cutoff <= s.last_at < now - timedelta(days=days)
+            ]
+        except ValueError:
+            prev_filtered = []
+    else:
+        prev_filtered = []
 
-    def _ctx(request: Request, **extra: Any) -> dict[str, Any]:
-        kpis = store.get_kpis()
+    def totals(sessions: list[Session]) -> dict:
         return {
-            "request": request,
-            "version": __version__,
-            "kpis": kpis,
-            "claude_projects": str(CLAUDE_PROJECTS_DIR),
-            "tracebook_home": str(TRACEBOOK_HOME),
-            "now": datetime.now(timezone.utc),
-            **extra,
+            "tokens": sum(s.tokens_in + s.tokens_out + s.cache_read + s.cache_write for s in sessions),
+            "cost": sum(s.cost for s in sessions),
+            "sessions": len(sessions),
         }
 
-    # ---- Routes ----------------------------------------------------------
+    cur = totals(filtered)
+    prev = totals(prev_filtered)
 
-    @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request) -> Any:
-        sessions = store.list_sessions()
-        live_session = next((s for s in sessions if s.is_live), None)
-        recent = sessions[:8]
-        projects = store.get_projects()
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            _ctx(
-                request,
-                sessions=sessions,
-                live_session=live_session,
-                recent_sessions=recent,
-                projects=projects,
-                page="dashboard",
-            ),
-        )
+    def pct_delta(a: float, b: float) -> Optional[float]:
+        if b == 0:
+            return None
+        return round((a - b) / b * 100, 1)
 
-    @app.get("/sessions", response_class=HTMLResponse)
-    def sessions_index(request: Request, limit: int = 200) -> Any:
-        all_sessions = store.list_sessions()
-        sessions = all_sessions[: max(1, min(limit, 1000))]
-        return templates.TemplateResponse(
-            request,
-            "sessions.html",
-            _ctx(
-                request,
-                sessions=sessions,
-                total_count=len(all_sessions),
-                shown_count=len(sessions),
-                total_cost=sum(s.total_cost_usd for s in all_sessions),
-                live_count=sum(1 for s in all_sessions if s.is_live),
-                page="sessions",
-            ),
-        )
+    # KPI sparklines — 12 data points over the period
+    spark_tokens, spark_cost, spark_sessions = _build_sparklines(all_sessions, period)
 
-    @app.get("/sessions/{session_id}", response_class=HTMLResponse)
-    def session_detail(request: Request, session_id: str) -> Any:
-        try:
-            session = store.get_session(session_id)
-        except LookupError as exc:
-            raise HTTPException(status_code=404, detail="session not found") from exc
-        return templates.TemplateResponse(
-            request,
-            "session_detail.html",
-            _ctx(
-                request,
-                session=session,
-                page="sessions",
-            ),
-        )
+    # Daily chart data
+    chart = _build_chart(all_sessions, period)
 
-    @app.get("/cost", response_class=HTMLResponse)
-    def cost(request: Request) -> Any:
-        sessions = store.list_sessions()
-        kpis = store.get_kpis()
-        # weekly + all-time totals
-        now = datetime.now(timezone.utc)
-        week_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        from datetime import timedelta as _td
-        week_start -= _td(days=now.weekday())
-        cost_week = sum(
-            s.total_cost_usd
-            for s in sessions
-            if s.last_activity_at and s.last_activity_at >= week_start
-        )
-        cache_savings = _compute_cache_savings(sessions)
-        daily = store.daily_cost_series(days=14)
-        prompts = store.top_prompts(window="today", limit=5)
-        # Render chart geometry server-side so we don't need any JS.
-        chart = _build_chart(daily)
-        return templates.TemplateResponse(
-            request,
-            "cost.html",
-            _ctx(
-                request,
-                sessions=sessions,
-                kpis=kpis,
-                cost_week=cost_week,
-                cache_savings=cache_savings,
-                daily=daily,
-                prompts=prompts,
-                chart=chart,
-                page="cost",
-            ),
-        )
+    # Project breakdown
+    project_pie = _build_project_pie(filtered)
 
-    @app.get("/api/sessions")
-    def api_sessions() -> JSONResponse:
-        return JSONResponse([_session_summary(s) for s in store.list_sessions()])
+    # Cache stats
+    cache_read_total = sum(s.cache_read for s in filtered)
+    cache_write_total = sum(s.cache_write for s in filtered)
+    tokens_total = sum(s.tokens_in + s.tokens_out + s.cache_read + s.cache_write for s in filtered)
+    cache_ratio = cache_read_total / tokens_total if tokens_total else 0
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, Any]:
-        return {"ok": True, "version": __version__}
+    avg_cost = cur["cost"] / max(cur["sessions"], 1)
+    prev_avg_cost = prev.get("cost", 0) / max(prev.get("sessions", 1), 1) if prev["sessions"] > 0 else 0
 
-    return app
+    return JSONResponse({
+        "kpis": {
+            "tokens": {"value": cur["tokens"], "delta": pct_delta(cur["tokens"], prev["tokens"])},
+            "sessions": {"value": cur["sessions"], "delta": pct_delta(cur["sessions"], prev["sessions"])},
+            "cost": {"value": cur["cost"], "delta": pct_delta(cur["cost"], prev["cost"])},
+            "avg_cost": {"value": avg_cost, "delta": pct_delta(avg_cost, prev_avg_cost)},
+        },
+        "sparklines": {
+            "tokens": spark_tokens,
+            "cost": spark_cost,
+            "sessions": spark_sessions,
+        },
+        "chart": chart,
+        "project_pie": project_pie,
+        "cache": {
+            "read_ratio": round(cache_ratio, 4),
+            "read_tokens": cache_read_total,
+            "write_tokens": cache_write_total,
+            "uncached_tokens": sum(s.tokens_in for s in filtered),
+        },
+        "recent": [_session_summary(s) for s in filtered[:10]],
+    })
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+@app.get("/api/settings")
+async def api_settings() -> JSONResponse:
+    hooks = _detect_hooks()
+    mcp_servers = _detect_mcp_servers()
+    pricing_rows = [
+        {
+            "model": p.model,
+            "input": p.input,
+            "output": p.output,
+            "cacheWrite": p.cache_write,
+            "cacheRead": p.cache_read,
+        }
+        for p in PRICING
+    ]
+    paths = [
+        ("claude code transcripts", str(settings.claude_projects)),
+        ("tracebook home", str(settings.tracebook_home)),
+    ]
+    return JSONResponse({
+        "hooks": hooks,
+        "mcp_servers": mcp_servers,
+        "pricing": pricing_rows,
+        "paths": [{"label": l, "path": p} for l, p in paths],
+        "about": {
+            "version": __version__,
+            "python": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+            "sessions": len(store.sessions),
+            "daemon": "running",
+            "license": "apache 2.0",
+            "port": settings.port,
+        },
+    })
 
 
-def _session_summary(s: Session) -> dict[str, Any]:
+# ─── Serialisation helpers ────────────────────────────────────────────────────
+
+def _session_summary(s: Session) -> dict:
+    now = datetime.now(tz=timezone.utc)
+    from tracebook.parsers.claude import _relative_time
     return {
         "id": s.id,
-        "short_id": s.short_id,
+        "short": s.short,
+        "preview": s.preview,
         "cwd": s.cwd,
-        "project_name": s.project_name,
+        "project": s.project,
+        "branch": s.branch,
+        "turns": s.turns,
+        "cost": round(s.cost, 4),
+        "duration": s.duration_str,
+        "started": _relative_time(s.started_at, now),
+        "last": "now" if s.live else _relative_time(s.last_at, now),
+        "live": s.live,
+        "status": s.status,
+        "provider": s.provider,
         "model": s.model,
-        "turns": len(s.turns),
-        "cost_usd": round(s.total_cost_usd, 4),
-        "size_bytes": s.size_bytes,
-        "is_live": s.is_live,
-        "first_user_prompt": s.first_user_prompt,
-        "started_at": s.started_at.isoformat() if s.started_at else None,
-        "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+        "lastAction": s.last_action,
+        "tokensIn": s.tokens_in,
+        "tokensOut": s.tokens_out,
+        "cacheWrite": s.cache_write,
+        "cacheRead": s.cache_read,
+        "contextUsed": s.context_used,
+        "contextMax": s.context_max,
     }
 
 
-def _compute_cache_savings(sessions: list[Session]) -> float:
-    """Estimate $ saved vs the same tokens billed at full input price."""
-    from tracebook.settings import price_for, load_pricing
+def _session_detail(s: Session) -> dict:
+    summary = _session_summary(s)
+    summary["trace"] = {
+        "totalDuration": s.trace_nodes[0].duration if s.trace_nodes else 0,
+        "totalTokens": sum(n.tokens for n in s.trace_nodes),
+        "totalCost": round(sum(n.cost for n in s.trace_nodes), 4),
+        "nodes": [_node_dict(n) for n in s.trace_nodes],
+    }
+    summary["transcript"] = s.transcript
 
-    pricing = load_pricing()
-    saved = 0.0
-    for s in sessions:
-        if not s.total_cache_read_tokens:
-            continue
-        p = price_for(s.model, pricing)
-        # Cache reads cost cache_read_per_mtok; without cache they'd cost input_per_mtok.
-        diff = (p.input_per_mtok - p.cache_read_per_mtok) * s.total_cache_read_tokens
-        saved += diff / 1_000_000
-    return saved
+    # Context budget estimation
+    summary["contextBudget"] = _build_context_budget(s)
+    return summary
 
 
-def _build_chart(daily: list[Any]) -> dict[str, Any]:
-    """Pre-compute SVG bar geometry for the 14-day chart."""
-    width = 560
-    height = 160
-    bars: list[dict[str, Any]] = []
-    if not daily:
-        return {"bars": bars, "width": width, "height": height, "max": 0.0, "ticks": []}
-
-    max_cost = max((d.cost for d in daily), default=0.0)
-    if max_cost <= 0:
-        max_cost = 1.0  # avoid div-by-zero
-    # Round max up to a "nice" tick.
-    nice_max = _nice_ceil(max_cost)
-    chart_left = 32
-    chart_right = width
-    chart_top = 20
-    chart_bottom = 140
-    span = chart_right - chart_left
-    n = len(daily)
-    bar_w = max(8.0, (span / n) * 0.55)
-    step = span / n if n else 0
-    for i, d in enumerate(daily):
-        x = chart_left + i * step + (step - bar_w) / 2
-        h = (d.cost / nice_max) * (chart_bottom - chart_top) if nice_max else 0
-        y = chart_bottom - h
-        bars.append(
-            {
-                "x": round(x, 2),
-                "y": round(y, 2),
-                "w": round(bar_w, 2),
-                "h": round(h, 2),
-                "date": d.date,
-                "cost": d.cost,
-                "label_x": round(x + bar_w / 2, 2),
-                "is_today": i == len(daily) - 1,
-            }
-        )
-    ticks = [
-        {"y": chart_top, "label": _money(nice_max)},
-        {"y": (chart_top + chart_bottom) / 2, "label": _money(nice_max / 2)},
-        {"y": chart_bottom, "label": "$0"},
-    ]
+def _node_dict(n: TraceNode) -> dict:
     return {
-        "bars": bars,
-        "width": width,
-        "height": height,
-        "max": nice_max,
-        "ticks": ticks,
+        "id": n.id,
+        "type": n.type,
+        "name": n.name,
+        "start": n.start,
+        "duration": n.duration,
+        "tokens": n.tokens,
+        "cost": round(n.cost, 6),
+        "depth": n.depth,
+        "parent": n.parent,
+        "live": n.live,
+        "preview": n.preview,
+        "children": n.children,
     }
 
 
-def _nice_ceil(value: float) -> float:
-    if value <= 0:
-        return 1.0
-    import math
+def _build_context_budget(s: Session) -> dict:
+    used = s.context_used
+    max_ctx = s.context_max or 200_000
 
-    exp = math.floor(math.log10(value))
-    base = 10 ** exp
-    n = value / base
-    if n <= 1:
-        nice = 1
-    elif n <= 2:
-        nice = 2
-    elif n <= 5:
-        nice = 5
-    else:
-        nice = 10
-    return nice * base
+    # Heuristic breakdown — real per-category data requires CLAUDE.md parsing
+    system_tools = min(used // 8, 22400)
+    messages = max(used - system_tools - 9500 - 2100, 0)
+
+    return {
+        "model": s.model,
+        "contextMax": max_ctx,
+        "contextUsed": used,
+        "categories": [
+            {"key": "system_prompt",  "label": "system prompt",      "tokens": 9500,        "color": "#34d399"},
+            {"key": "system_tools",   "label": "system tools",       "tokens": system_tools, "color": "#6ee7b7"},
+            {"key": "mcp_tools",      "label": "mcp tools",          "tokens": 2100,        "color": "#67e8f9"},
+            {"key": "messages",       "label": "messages",           "tokens": messages,    "color": "#7dd3fc"},
+        ],
+    }
 
 
-# Importable WSGI/ASGI entry point used by uvicorn ("tracebook.app:app").
-app = create_app()
+def _build_sparklines(sessions: list[Session], period: str) -> tuple[list, list, list]:
+    now = datetime.now(tz=timezone.utc)
+    points = 12
+    try:
+        days = int(period) if period != "all" else 90
+    except ValueError:
+        days = 14
+    bucket_hours = days * 24 / points
+
+    spark_tokens: list[float] = []
+    spark_cost: list[float] = []
+    spark_sessions: list[int] = []
+
+    for i in range(points):
+        end = now - timedelta(hours=bucket_hours * (points - 1 - i))
+        start = end - timedelta(hours=bucket_hours)
+        bucket = [
+            s for s in sessions
+            if s.last_at and start <= s.last_at < end
+        ]
+        tokens = sum(s.tokens_in + s.tokens_out + s.cache_read + s.cache_write for s in bucket)
+        cost = sum(s.cost for s in bucket)
+        spark_tokens.append(tokens / 1000)
+        spark_cost.append(cost)
+        spark_sessions.append(len(bucket))
+
+    # Ensure at least some data if all zeroes (prevents flat line)
+    if all(v == 0 for v in spark_tokens) and sessions:
+        spark_tokens = [float(i + 1) for i in range(points)]
+    if all(v == 0 for v in spark_sessions) and sessions:
+        spark_sessions = list(range(1, points + 1))
+
+    return spark_tokens, spark_cost, spark_sessions
+
+
+def _build_chart(sessions: list[Session], period: str) -> list[dict]:
+    now = datetime.now(tz=timezone.utc)
+    try:
+        days = int(period) if period != "all" else 30
+    except ValueError:
+        days = 14
+
+    days = min(days, 90)  # cap to avoid massive charts
+    chart: list[dict] = []
+
+    for i in range(days - 1, -1, -1):
+        day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_end = day_start + timedelta(days=1)
+        day_sessions = [
+            s for s in sessions
+            if s.last_at and day_start <= s.last_at < day_end
+        ]
+
+        opus = sonnet = haiku = other = 0
+        cost = 0.0
+        for s in day_sessions:
+            t = s.tokens_in + s.tokens_out + s.cache_read + s.cache_write
+            m = s.model.lower()
+            if "opus" in m:
+                opus += t
+            elif "sonnet" in m:
+                sonnet += t
+            elif "haiku" in m:
+                haiku += t
+            else:
+                other += t
+            cost += s.cost
+
+        chart.append({
+            "day": day_start.strftime("%m-%d"),
+            "label": str(day_start.day),
+            "opus": opus,
+            "sonnet": sonnet,
+            "haiku": haiku,
+            "other": other,
+            "total": opus + sonnet + haiku + other,
+            "cost": round(cost, 4),
+            "today": i == 0,
+        })
+
+    return chart
+
+
+def _build_project_pie(sessions: list[Session]) -> list[dict]:
+    project_map: dict[str, dict] = {}
+    for s in sessions:
+        p = s.project
+        if p not in project_map:
+            project_map[p] = {"project": p, "tokens": 0, "cost": 0.0, "sessions": 0}
+        project_map[p]["tokens"] += s.tokens_in + s.tokens_out + s.cache_read + s.cache_write
+        project_map[p]["cost"] += s.cost
+        project_map[p]["sessions"] += 1
+
+    rows = sorted(project_map.values(), key=lambda r: r["cost"], reverse=True)
+    for r in rows:
+        r["cost"] = round(r["cost"], 4)
+    return rows[:8]
+
+
+def _detect_hooks() -> list[dict]:
+    claude_settings_path = Path("~/.claude/settings.json").expanduser()
+    hooks: list[dict] = []
+    if claude_settings_path.exists():
+        try:
+            data = json.loads(claude_settings_path.read_text())
+            raw_hooks = data.get("hooks", {})
+            for name, config in raw_hooks.items():
+                hooks.append({
+                    "name": name,
+                    "status": "configured",
+                    "calls": 0,
+                    "last": "—",
+                })
+        except Exception:
+            pass
+    if not hooks:
+        hooks = [
+            {"name": "PreToolUse",   "status": "not registered", "calls": 0, "last": "—"},
+            {"name": "PostToolUse",  "status": "not registered", "calls": 0, "last": "—"},
+            {"name": "Stop",         "status": "not registered", "calls": 0, "last": "—"},
+            {"name": "SessionStart", "status": "not registered", "calls": 0, "last": "—"},
+        ]
+    return hooks
+
+
+def _detect_mcp_servers() -> list[dict]:
+    servers: list[dict] = []
+    for cfg_path in [
+        Path("~/.claude/settings.json").expanduser(),
+        Path("~/.claude/settings.local.json").expanduser(),
+    ]:
+        if not cfg_path.exists():
+            continue
+        try:
+            data = json.loads(cfg_path.read_text())
+            for name, cfg in data.get("mcpServers", {}).items():
+                servers.append({
+                    "name": name,
+                    "transport": cfg.get("type", "stdio"),
+                    "status": "configured",
+                    "tools": 0,
+                    "calls": 0,
+                })
+        except Exception:
+            pass
+    return servers
