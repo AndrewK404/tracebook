@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}tracebook · cost{% endblock %}
+
+{% block content %}
+  <section class="mb-2 flex items-baseline gap-4 flex-wrap">
+    <h1 class="text-2xl font-semibold tracking-tight">Cost</h1>
+    <span class="text-sm text-zinc-500">Computed locally · deduped by message id</span>
+    <span class="ml-auto text-xs text-zinc-500 font-mono">pricing · {{ tracebook_home }}/pricing.json</span>
+  </section>
+  <p class="text-sm text-zinc-500 mb-6">
+    Numbers come from <span class="font-mono text-zinc-400">{{ claude_projects }}/**/*.jsonl</span>.
+    No external billing API is called.
+  </p>
+
+  {% if kpis.sessions_total == 0 %}
+    {% with title="No cost data yet",
+            body="Tracebook computes cost from the JSONL transcripts your CLI writes. None found yet.",
+            path=claude_projects %}
+      {% include "_empty.html" %}
+    {% endwith %}
+  {% else %}
+
+    <!-- KPI strip -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Today</div>
+        <div class="text-2xl font-semibold num mt-1">{{ kpis.cost_today|money }}</div>
+        <div class="text-xs text-zinc-500 mt-1">
+          <span class="num text-zinc-300">{{ kpis.sessions_today }}</span> sessions
+        </div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">This week</div>
+        <div class="text-2xl font-semibold num mt-1">{{ cost_week|money }}</div>
+        <div class="text-xs text-zinc-500 mt-1">since Monday 00:00</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">All time</div>
+        <div class="text-2xl font-semibold num mt-1">{{ kpis.cost_total|money }}</div>
+        <div class="text-xs text-zinc-500 mt-1">
+          <span class="num text-zinc-300">{{ kpis.sessions_total }}</span> sessions
+        </div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Cache savings</div>
+        <div class="text-2xl font-semibold num mt-1 text-emerald-300">{{ cache_savings|money }}</div>
+        <div class="text-xs text-zinc-500 mt-1">vs full input price</div>
+      </div>
+    </section>
+
+    <!-- Daily chart -->
+    <section class="mb-8">
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-5">
+        <div class="flex items-baseline justify-between mb-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Daily cost · last {{ daily|length }} days</div>
+          <div class="text-xs text-zinc-500 num">peak {{ chart.max|money }}</div>
+        </div>
+        <svg viewBox="0 0 {{ chart.width }} {{ chart.height }}" class="w-full" role="img" aria-label="Daily cost chart">
+          {% for tick in chart.ticks %}
+            <line x1="0" y1="{{ tick.y }}" x2="{{ chart.width }}" y2="{{ tick.y }}" stroke="rgb(39 39 42)" stroke-dasharray="2,4"/>
+            <text x="0" y="{{ tick.y - 2 }}" font-size="9" fill="rgb(82 82 91)" font-family="ui-monospace, monospace">{{ tick.label }}</text>
+          {% endfor %}
+          {% for bar in chart.bars %}
+            <rect x="{{ bar.x }}" y="{{ bar.y }}" width="{{ bar.w }}" height="{{ bar.h }}" fill="{% if bar.is_today %}rgb(52 211 153){% else %}rgb(113 113 122){% endif %}"/>
+            {% if bar.is_today and bar.cost > 0 %}
+              <text x="{{ bar.label_x }}" y="{{ bar.y - 4 }}" font-size="9" fill="rgb(52 211 153)" font-family="ui-monospace, monospace" text-anchor="middle">{{ bar.cost|money }}</text>
+            {% endif %}
+          {% endfor %}
+          <g font-size="9" fill="rgb(82 82 91)" font-family="ui-monospace, monospace" text-anchor="middle">
+            {% for bar in chart.bars %}
+              {% if loop.index0 % 2 == 0 or bar.is_today %}
+                <text x="{{ bar.label_x }}" y="{{ chart.height - 5 }}">{% if bar.is_today %}today{% else %}{{ bar.date[5:] }}{% endif %}</text>
+              {% endif %}
+            {% endfor %}
+          </g>
+        </svg>
+      </div>
+    </section>
+
+    <!-- Top expensive prompts -->
+    <section class="grid lg:grid-cols-3 gap-6 mb-8">
+      <div class="lg:col-span-2">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm uppercase tracking-wide text-zinc-400">Top {{ prompts|length }} expensive prompts · today</h2>
+          <span class="text-xs text-zinc-500 num">total {{ kpis.cost_today|money }}</span>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+          {% if prompts|length == 0 %}
+            <div class="px-4 py-8 text-center text-sm text-zinc-500">
+              No expensive prompts in the current window.
+            </div>
+          {% else %}
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-950/40">
+                <tr>
+                  <th class="text-right font-medium px-4 py-2.5 num w-20">Cost</th>
+                  <th class="text-left font-medium px-4 py-2.5">Prompt</th>
+                  <th class="text-left font-medium px-4 py-2.5 hidden md:table-cell">Session</th>
+                  <th class="text-right font-medium px-4 py-2.5 num">Tokens</th>
+                  <th class="text-right font-medium px-4 py-2.5">When</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/60 text-xs">
+                {% for p in prompts %}
+                  <tr class="hover:bg-zinc-900/60 transition-colors">
+                    <td class="px-4 py-2.5 text-right num text-zinc-200 font-medium">{{ p.cost|money }}</td>
+                    <td class="px-4 py-2.5 text-zinc-300 truncate max-w-md">{{ p.prompt|truncate(120, True, '…') }}</td>
+                    <td class="px-4 py-2.5 font-mono text-zinc-500 hidden md:table-cell">
+                      <a href="/sessions/{{ p.session_id }}" class="hover:text-emerald-300">{{ p.session_short }}</a>
+                    </td>
+                    <td class="px-4 py-2.5 text-right num text-zinc-400">{{ (p.tokens / 1000)|round(1) }}k</td>
+                    <td class="px-4 py-2.5 text-right text-zinc-500 num">{{ p.when|ago }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          {% endif %}
+        </div>
+      </div>
+
+      <aside class="space-y-3">
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500 mb-2">How cost is computed</div>
+          <ul class="space-y-1.5 text-xs text-zinc-400 leading-relaxed">
+            <li><span class="text-emerald-300 font-mono">cache savings</span> — discount from cache reads vs full input price.</li>
+            <li><span class="text-zinc-300 font-mono">today</span> resets at local midnight.</li>
+            <li>Subscription users see compute, not invoiced cost — API tier rates are the reference.</li>
+          </ul>
+        </div>
+        <div class="rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500 mb-2">Override pricing</div>
+          <p class="text-xs text-zinc-400 leading-relaxed">
+            Drop a JSON file at <span class="font-mono text-zinc-300">{{ tracebook_home }}/pricing.json</span> to override per-model rates.
+          </p>
+        </div>
+      </aside>
+    </section>
+  {% endif %}
+{% endblock %}

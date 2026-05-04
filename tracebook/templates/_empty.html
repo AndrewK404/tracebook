@@ -1,0 +1,9 @@
+{# Reusable instructive empty state. Caller passes `title`, `body`, `path`. #}
+<div class="rounded-lg bg-zinc-900 border border-zinc-800 p-10 text-center">
+  <div class="text-zinc-600 text-2xl">⌀</div>
+  <div class="text-sm text-zinc-300 mt-3">{{ title }}</div>
+  <p class="text-xs text-zinc-500 mt-2 max-w-md mx-auto leading-relaxed">{{ body|safe }}</p>
+  {% if path %}
+    <div class="mt-4 inline-block font-mono text-xs px-3 py-1.5 rounded bg-zinc-950 border border-zinc-800 text-zinc-300">{{ path }}</div>
+  {% endif %}
+</div>

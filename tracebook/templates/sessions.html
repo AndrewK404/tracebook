@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}tracebook · sessions{% endblock %}
+
+{% block content %}
+  <section class="mb-6 flex items-baseline gap-4 flex-wrap">
+    <h1 class="text-2xl font-semibold tracking-tight">Sessions</h1>
+    <span class="text-sm text-zinc-500 num">
+      {{ total_count }} total{% if live_count %} · <span class="text-emerald-300">{{ live_count }} live</span>{% endif %}
+    </span>
+    <span class="ml-auto text-xs text-zinc-500 font-mono">{{ claude_projects }}</span>
+  </section>
+
+  {% if sessions|length == 0 %}
+    {% with title="No Claude Code sessions yet",
+            body="Tracebook reads transcripts from the path below. Start a session with <span class='font-mono text-zinc-300'>claude</span> in any folder and reload.",
+            path=claude_projects %}
+      {% include "_empty.html" %}
+    {% endwith %}
+  {% else %}
+    <section class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-950/40">
+          <tr>
+            <th class="text-left font-medium px-4 py-3">Session</th>
+            <th class="text-left font-medium px-4 py-3 hidden md:table-cell">cwd</th>
+            <th class="text-right font-medium px-4 py-3 num">Turns</th>
+            <th class="text-right font-medium px-4 py-3 num">Cost</th>
+            <th class="text-right font-medium px-4 py-3 num hidden lg:table-cell">Size</th>
+            <th class="text-right font-medium px-4 py-3">Started</th>
+            <th class="text-right font-medium px-4 py-3">Last</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800/60">
+          {% for s in sessions %}
+            <tr class="hover:bg-zinc-900/60 transition-colors">
+              <td class="px-4 py-3">
+                <a href="/sessions/{{ s.id }}" class="block">
+                  <div class="flex items-center gap-2">
+                    {% if s.is_live %}<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>{% endif %}
+                    <span class="font-mono text-xs text-zinc-300">{{ s.short_id }}</span>
+                  </div>
+                  {% if s.first_user_prompt %}
+                    <div class="text-xs text-zinc-400 truncate max-w-md mt-0.5">{{ s.first_user_prompt }}</div>
+                  {% endif %}
+                </a>
+              </td>
+              <td class="px-4 py-3 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">{{ s.cwd|short_path(48) }}</span></td>
+              <td class="px-4 py-3 text-right num text-xs text-zinc-300">{{ s.turn_count }}</td>
+              <td class="px-4 py-3 text-right num text-xs text-zinc-300">{{ s.total_cost_usd|money }}</td>
+              <td class="px-4 py-3 text-right num text-xs text-zinc-500 hidden lg:table-cell">{{ s.size_bytes|humanize_bytes }}</td>
+              <td class="px-4 py-3 text-right text-xs text-zinc-500 num">{{ s.started_at|ago }}</td>
+              <td class="px-4 py-3 text-right text-xs {% if s.is_live %}text-emerald-300{% else %}text-zinc-400 num{% endif %}">
+                {% if s.is_live %}live{% else %}{{ s.last_activity_at|ago }}{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="px-4 py-2.5 border-t border-zinc-800/60 text-xs text-zinc-500 flex items-center gap-3 num">
+        <span>showing {{ shown_count }} of {{ total_count }}</span>
+        {% if shown_count < total_count %}
+          <a href="/sessions?limit=1000" class="text-zinc-400 hover:text-emerald-300">show all →</a>
+        {% endif %}
+        <span class="ml-auto">total cost <span class="text-zinc-300">{{ total_cost|money }}</span></span>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

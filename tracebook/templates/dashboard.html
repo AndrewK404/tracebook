@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}tracebook · dashboard{% endblock %}
+
+{% block content %}
+  <section class="mb-2">
+    <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+    <p class="text-sm text-zinc-500 mt-1">
+      Overview of your local agent activity.
+      {% if kpis.last_activity %}
+        <span class="font-mono text-zinc-600">— last activity {{ kpis.last_activity|ago }}</span>
+      {% endif %}
+    </p>
+  </section>
+
+  {% if kpis.sessions_total == 0 %}
+    <section class="mt-10">
+      {% with title="No Claude Code sessions yet",
+              body="Run <span class='font-mono text-zinc-300'>claude</span> in any folder, send one message, then refresh this page. Tracebook reads transcripts from the path below.",
+              path=claude_projects %}
+        {% include "_empty.html" %}
+      {% endwith %}
+    </section>
+  {% else %}
+
+    <!-- KPI strip -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 mb-6">
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Sessions</div>
+        <div class="text-2xl font-semibold num mt-1">{{ kpis.sessions_total|commas }}</div>
+        <div class="text-xs text-zinc-500 mt-1">
+          <span class="num text-zinc-300">{{ kpis.sessions_today }}</span> today
+        </div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Total turns</div>
+        <div class="text-2xl font-semibold num mt-1">{{ kpis.turns_total|commas }}</div>
+        <div class="text-xs text-zinc-500 mt-1">across all sessions</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Cost today</div>
+        <div class="text-2xl font-semibold num mt-1">{{ kpis.cost_today|money }}</div>
+        <div class="text-xs text-zinc-500 mt-1">
+          all-time <span class="num text-zinc-300">{{ kpis.cost_total|money }}</span>
+        </div>
+      </div>
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Live</div>
+        <div class="text-2xl font-semibold num mt-1 {% if kpis.live_count %}text-emerald-300{% endif %}">{{ kpis.live_count }}</div>
+        <div class="text-xs text-zinc-500 mt-1">
+          {% if kpis.live_count %}streaming now{% else %}no active session{% endif %}
+        </div>
+      </div>
+    </section>
+
+    {% if live_session %}
+      <!-- Active-now card -->
+      <section class="mb-8 rounded-lg bg-zinc-900 border border-emerald-500/30 ring-1 ring-emerald-500/10 overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-950/40 flex items-center gap-3 text-xs">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>
+          <span class="text-emerald-300 uppercase tracking-wide">Active now</span>
+          <span class="text-zinc-500 ml-auto num">streaming · {{ live_session.last_activity_at|ago }}</span>
+        </div>
+        <div class="px-4 py-3 flex items-center gap-4 flex-wrap">
+          <a href="/sessions/{{ live_session.id }}" class="font-mono text-sm text-zinc-200 hover:text-emerald-300">{{ live_session.short_id }}</a>
+          <span class="text-xs text-zinc-500 font-mono">{{ live_session.cwd|short_path }}</span>
+          <span class="text-xs text-zinc-500 num">{{ live_session.turn_count }} turns</span>
+          <span class="text-xs text-zinc-500 num">{{ live_session.total_cost_usd|money }}</span>
+          {% if live_session.first_user_prompt %}
+            <span class="text-xs text-zinc-500 truncate max-w-md">{{ live_session.first_user_prompt }}</span>
+          {% endif %}
+        </div>
+      </section>
+    {% endif %}
+
+    <!-- Two-column main: recent sessions + projects aside -->
+    <section class="grid lg:grid-cols-3 gap-6 mb-8">
+      <div class="lg:col-span-2">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm uppercase tracking-wide text-zinc-400">Recent sessions</h2>
+          <a href="/sessions" class="text-xs text-zinc-500 hover:text-zinc-200">view all →</a>
+        </div>
+
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-950/40">
+              <tr>
+                <th class="text-left font-medium px-4 py-2.5">Session</th>
+                <th class="text-left font-medium px-4 py-2.5 hidden md:table-cell">cwd</th>
+                <th class="text-right font-medium px-4 py-2.5 num">Turns</th>
+                <th class="text-right font-medium px-4 py-2.5 num">Cost</th>
+                <th class="text-right font-medium px-4 py-2.5">Last</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-800/60">
+              {% for s in recent_sessions %}
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <a href="/sessions/{{ s.id }}" class="block">
+                      <div class="flex items-center gap-2">
+                        {% if s.is_live %}<span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>{% endif %}
+                        <span class="font-mono text-xs text-zinc-300">{{ s.short_id }}</span>
+                      </div>
+                      {% if s.first_user_prompt %}
+                        <div class="text-xs text-zinc-500 truncate max-w-md mt-0.5">{{ s.first_user_prompt }}</div>
+                      {% endif %}
+                    </a>
+                  </td>
+                  <td class="px-4 py-2.5 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">{{ s.cwd|short_path(48) }}</span></td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-300">{{ s.turn_count }}</td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-300">{{ s.total_cost_usd|money }}</td>
+                  <td class="px-4 py-2.5 text-right text-xs {% if s.is_live %}text-emerald-300{% else %}text-zinc-500{% endif %}">
+                    {% if s.is_live %}live{% else %}{{ s.last_activity_at|ago }}{% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <aside class="space-y-6">
+        <div>
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm uppercase tracking-wide text-zinc-400">Projects</h2>
+            <span class="text-xs text-zinc-500 num">{{ projects|length }} cwds</span>
+          </div>
+          <ul class="rounded-lg bg-zinc-900 border border-zinc-800 divide-y divide-zinc-800/60">
+            {% for p in projects %}
+              <li>
+                <div class="block px-4 py-3">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">{{ p.name }}</span>
+                    <span class="num text-emerald-300 text-xs">{{ p.session_count }}</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 font-mono truncate">{{ p.cwd|short_path(48) }}</div>
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div>
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm uppercase tracking-wide text-zinc-400">Quick stats</h2>
+          </div>
+          <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4 space-y-2 text-xs">
+            <div class="flex justify-between"><span class="text-zinc-500">Sessions today</span><span class="num text-zinc-300">{{ kpis.sessions_today }}</span></div>
+            <div class="flex justify-between"><span class="text-zinc-500">Total turns</span><span class="num text-zinc-300">{{ kpis.turns_total|commas }}</span></div>
+            <div class="flex justify-between"><span class="text-zinc-500">All-time cost</span><span class="num text-zinc-300">{{ kpis.cost_total|money }}</span></div>
+            {% if kpis.last_activity %}
+              <div class="flex justify-between"><span class="text-zinc-500">Last activity</span><span class="text-zinc-300">{{ kpis.last_activity|ago }}</span></div>
+            {% endif %}
+          </div>
+        </div>
+      </aside>
+    </section>
+  {% endif %}
+{% endblock %}

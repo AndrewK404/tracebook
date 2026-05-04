@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>leibniz · dashboard</title>
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
+    <style>
+      :root { color-scheme: dark; }
+      html, body {
+        font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      .num { font-variant-numeric: tabular-nums; }
+      .font-mono, code, pre, kbd {
+        font-family: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+      }
+      .dot-live { box-shadow: 0 0 8px rgba(52, 211, 153, 0.5); }
+      .dot-warn { box-shadow: 0 0 8px rgba(251, 191, 36, 0.5); }
+      .pulse { animation: pulse 2s ease-in-out infinite; }
+      @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+    </style>
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col">
+    <header class="border-b border-zinc-800 bg-zinc-900/60 sticky top-0 backdrop-blur z-20">
+      <div class="max-w-7xl mx-auto px-6 h-14 flex items-center gap-6">
+        <a href="index.html" class="font-mono text-lg font-semibold tracking-tight flex items-center gap-2">
+          <span class="text-emerald-400">L</span>
+          <span class="hidden sm:inline">leibniz</span>
+        </a>
+        <nav class="flex gap-5 text-sm">
+          <a href="dashboard.html" class="py-1.5 border-b-2 border-emerald-400 text-zinc-100 transition-colors">Dashboard</a>
+          <a href="sessions.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Sessions</a>
+          <a href="approvals.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Approvals</a>
+          <a href="memory.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Memory</a>
+          <a href="cost.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Cost</a>
+          <a href="settings.html" class="py-1.5 border-b-2 border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 transition-colors">Settings</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-4 text-xs text-zinc-500">
+          <span class="hidden md:inline">local · <span class="num">42</span> sessions</span>
+          <a href="approvals.html" class="hidden md:flex items-center gap-1.5 hover:text-zinc-200">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn pulse"></span>
+            <span class="num text-amber-300">3</span>
+            <span>pending</span>
+          </a>
+          <span class="flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live"></span>
+            <span class="font-mono">v0.1.0</span>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 py-6 w-full flex-1">
+      <section class="mb-2">
+        <h1 class="text-2xl font-semibold tracking-tight">Dashboard</h1>
+        <p class="text-sm text-zinc-500 mt-1">
+          Overview of your local agent activity.
+          <span class="font-mono text-zinc-600">— last activity 3s ago</span>
+        </p>
+      </section>
+
+      <!-- KPI strip -->
+      <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-6 mb-6">
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Sessions</div>
+          <div class="text-2xl font-semibold num mt-1">42</div>
+          <div class="text-xs text-zinc-500 mt-1">
+            <span class="num text-zinc-300">3</span> today
+          </div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Total turns</div>
+          <div class="text-2xl font-semibold num mt-1">2,847</div>
+          <div class="text-xs text-zinc-500 mt-1">across all sessions</div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Cost today</div>
+          <div class="text-2xl font-semibold num mt-1">$4.21</div>
+          <div class="text-xs text-zinc-500 mt-1">
+            Pro: <span class="num text-emerald-300">47%</span> of cap
+          </div>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Pending approvals</div>
+          <div class="text-2xl font-semibold num mt-1 text-amber-300">3</div>
+          <div class="text-xs text-zinc-500 mt-1">
+            <a href="approvals.html" class="hover:text-emerald-300">review →</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live "now active" card — NEW -->
+      <section class="mb-8 rounded-lg bg-zinc-900 border border-emerald-500/30 ring-1 ring-emerald-500/10 overflow-hidden">
+        <div class="px-4 py-2.5 border-b border-zinc-800/60 bg-zinc-950/40 flex items-center gap-3 text-xs">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>
+          <span class="text-emerald-300 uppercase tracking-wide">Active now</span>
+          <span class="text-zinc-500 ml-auto num">streaming · 3s ago</span>
+        </div>
+        <div class="px-4 py-3 flex items-center gap-4 flex-wrap">
+          <a href="session-detail.html" class="font-mono text-sm text-zinc-200 hover:text-emerald-300">01HXKQ3F8M2P9NTQ</a>
+          <span class="text-xs text-zinc-500 font-mono">~/code/leibniz-platform</span>
+          <span class="text-xs text-zinc-500 num">14 turns</span>
+          <span class="text-xs text-zinc-500 num">$0.42</span>
+          <span class="ml-auto inline-flex items-center gap-1.5 text-xs">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 dot-warn pulse"></span>
+            <span class="text-amber-300 font-mono">awaiting approval</span>
+            <a href="approvals.html" class="text-emerald-300 hover:text-emerald-200 font-mono ml-2">review →</a>
+          </span>
+        </div>
+        <div class="px-4 py-2 text-xs text-zinc-500 border-t border-zinc-800/40">
+          last action · <span class="font-mono text-zinc-400">Bash(rg --files -t py | xargs wc -l ⋯)</span>
+        </div>
+      </section>
+
+      <!-- Two-column main -->
+      <section class="grid lg:grid-cols-3 gap-6 mb-8">
+        <div class="lg:col-span-2">
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm uppercase tracking-wide text-zinc-400">Recent sessions</h2>
+            <a href="sessions.html" class="text-xs text-zinc-500 hover:text-zinc-200">view all →</a>
+          </div>
+
+          <div class="rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+            <table class="w-full text-sm">
+              <thead class="text-xs uppercase tracking-wide text-zinc-500 bg-zinc-950/40">
+                <tr>
+                  <th class="text-left font-medium px-4 py-2.5">Session</th>
+                  <th class="text-left font-medium px-4 py-2.5 hidden md:table-cell">cwd</th>
+                  <th class="text-right font-medium px-4 py-2.5 num">Turns</th>
+                  <th class="text-right font-medium px-4 py-2.5 num">Cost</th>
+                  <th class="text-right font-medium px-4 py-2.5">Last</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/60">
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <a href="session-detail.html" class="block">
+                      <div class="flex items-center gap-2">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>
+                        <span class="font-mono text-xs text-zinc-300">01HXKQ3F</span>
+                      </div>
+                      <div class="text-xs text-zinc-500 truncate max-w-md mt-0.5">add cost column to sessions table</div>
+                    </a>
+                  </td>
+                  <td class="px-4 py-2.5 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">~/code/leibniz-platform</span></td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-300">14</td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-300">$0.42</td>
+                  <td class="px-4 py-2.5 text-right text-xs text-emerald-300">live</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <a href="session-detail.html" class="block">
+                      <div class="font-mono text-xs text-zinc-300">01HXKQ8M</div>
+                      <div class="text-xs text-zinc-500 truncate max-w-md mt-0.5">debug pgvector slow query on projects table</div>
+                    </a>
+                  </td>
+                  <td class="px-4 py-2.5 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">~/code/atlas</span></td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">38</td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">$1.04</td>
+                  <td class="px-4 py-2.5 text-right text-xs text-zinc-500">3h ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <a href="session-detail.html" class="block">
+                      <div class="font-mono text-xs text-zinc-300">01HXKQ7C</div>
+                      <div class="text-xs text-zinc-500 truncate max-w-md mt-0.5">draft daily triage workflow yaml</div>
+                    </a>
+                  </td>
+                  <td class="px-4 py-2.5 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">~/code/leibniz-platform</span></td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">22</td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">$0.62</td>
+                  <td class="px-4 py-2.5 text-right text-xs text-zinc-500">8h ago</td>
+                </tr>
+                <tr class="hover:bg-zinc-900/60 transition-colors">
+                  <td class="px-4 py-2.5">
+                    <a href="session-detail.html" class="block">
+                      <div class="font-mono text-xs text-zinc-300">01HXKQA1</div>
+                      <div class="text-xs text-zinc-500 truncate max-w-md mt-0.5">refactor api/auth.py to new session middleware</div>
+                    </a>
+                  </td>
+                  <td class="px-4 py-2.5 hidden md:table-cell"><span class="font-mono text-xs text-zinc-500">~/code/atlas</span></td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">61</td>
+                  <td class="px-4 py-2.5 text-right num text-xs text-zinc-400">$1.81</td>
+                  <td class="px-4 py-2.5 text-right text-xs text-zinc-500">yesterday</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <aside class="space-y-6">
+          <div>
+            <div class="flex items-baseline justify-between mb-3">
+              <h2 class="text-sm uppercase tracking-wide text-zinc-400">Memory</h2>
+              <a href="memory.html" class="text-xs text-zinc-500 hover:text-zinc-200">manage →</a>
+            </div>
+            <ul class="rounded-lg bg-zinc-900 border border-zinc-800 divide-y divide-zinc-800/60">
+              <li>
+                <a href="#" class="block px-4 py-3 hover:bg-zinc-900/60 transition-colors">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">user_role.md</span>
+                    <span class="text-[9px] uppercase px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono">user</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 num">412 B · 2d ago · read 14× today</div>
+                </a>
+              </li>
+              <li>
+                <a href="#" class="block px-4 py-3 hover:bg-zinc-900/60 transition-colors">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">project_context.md</span>
+                    <span class="text-[9px] uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 font-mono">project</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 num">1.2 KB · 5h ago · read 8× today</div>
+                </a>
+              </li>
+              <li>
+                <a href="#" class="block px-4 py-3 hover:bg-zinc-900/60 transition-colors">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">feedback_auto_mode.md</span>
+                    <span class="text-[9px] uppercase px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700 font-mono">feedback</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 num">298 B · 7d ago</div>
+                </a>
+              </li>
+            </ul>
+          </div>
+
+          <div>
+            <div class="flex items-baseline justify-between mb-3">
+              <h2 class="text-sm uppercase tracking-wide text-zinc-400">Workflows</h2>
+              <a href="#" class="text-xs text-zinc-500 hover:text-zinc-200">manage →</a>
+            </div>
+            <ul class="rounded-lg bg-zinc-900 border border-zinc-800 divide-y divide-zinc-800/60">
+              <li>
+                <a href="#" class="block px-4 py-3 hover:bg-zinc-900/60 transition-colors">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">morning-triage.yaml</span>
+                    <span class="text-[10px] text-emerald-300">9:00</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 num">2 steps · last run 3h ago · ✓</div>
+                </a>
+              </li>
+              <li>
+                <a href="#" class="block px-4 py-3 hover:bg-zinc-900/60 transition-colors">
+                  <div class="flex items-center gap-2">
+                    <span class="font-mono text-xs text-zinc-200 truncate flex-1">pr-review.yaml</span>
+                    <span class="text-[10px] text-zinc-500">manual</span>
+                  </div>
+                  <div class="text-[10px] text-zinc-500 mt-1 num">3 steps · never run</div>
+                </a>
+              </li>
+            </ul>
+          </div>
+        </aside>
+      </section>
+
+      <!-- Projects chip strip -->
+      <section class="mb-8">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm uppercase tracking-wide text-zinc-400">Projects</h2>
+          <span class="text-xs text-zinc-500 num">3 cwds</span>
+        </div>
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-3 flex flex-wrap gap-2">
+          <span class="font-mono text-xs text-zinc-400 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">~/code/leibniz-platform <span class="text-emerald-300 num ml-1">12</span></span>
+          <span class="font-mono text-xs text-zinc-400 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">~/code/atlas <span class="text-zinc-500 num ml-1">22</span></span>
+          <span class="font-mono text-xs text-zinc-400 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">~/code/polymarket-agent <span class="text-zinc-500 num ml-1">8</span></span>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mt-auto border-t border-zinc-800 bg-zinc-950">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500 font-mono">
+        <span class="text-zinc-400">leibniz · v0.1-design</span>
+        <span class="hidden sm:inline">memory · ~/.leibniz/memory</span>
+        <span class="hidden md:inline">workflows · ~/.leibniz/workflows</span>
+        <span class="ml-auto"><a href="index.html" class="hover:text-zinc-200 transition-colors">← all mockups</a></span>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}tracebook · {{ session.short_id }}{% endblock %}
+
+{% block content %}
+  <section class="mb-6">
+    <a href="/sessions" class="text-xs text-zinc-500 hover:text-zinc-200">← all sessions</a>
+    <div class="flex items-baseline gap-4 mt-2 flex-wrap">
+      <h1 class="text-2xl font-semibold tracking-tight font-mono">{{ session.id }}</h1>
+      {% if session.is_live %}
+        <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 pulse"></span>
+          live
+        </span>
+      {% endif %}
+      <span class="text-sm text-zinc-500 num">{{ session.turn_count }} turns</span>
+      {% if session.started_at %}
+        <span class="text-sm text-zinc-500">started {{ session.started_at|ago }}</span>
+      {% endif %}
+      <span class="text-sm text-zinc-500 num">{{ session.total_cost_usd|money }}</span>
+    </div>
+    <div class="mt-2 text-xs text-zinc-500 font-mono break-all">{{ session.source_path }}</div>
+  </section>
+
+  <section class="grid lg:grid-cols-4 gap-6">
+    <!-- Aside -->
+    <aside class="lg:col-span-1 space-y-3">
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Status</div>
+        <div class="mt-2 flex items-center gap-2">
+          <span class="inline-block w-2 h-2 rounded-full {% if session.is_live %}bg-emerald-400 dot-live pulse{% else %}bg-zinc-600{% endif %}"></span>
+          <span class="text-sm text-zinc-200">{% if session.is_live %}running{% else %}idle{% endif %}</span>
+        </div>
+      </div>
+
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">cwd</div>
+        <div class="text-xs font-mono text-zinc-300 mt-1 break-all">{{ session.cwd }}</div>
+        {% if session.git_branch %}
+          <div class="text-[10px] text-zinc-500 mt-1 font-mono">git · {{ session.git_branch }}</div>
+        {% endif %}
+      </div>
+
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Model</div>
+        <div class="text-xs font-mono text-zinc-300 mt-1">{{ session.model or "—" }}</div>
+      </div>
+
+      <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+        <div class="text-xs uppercase tracking-wide text-zinc-500">Tokens</div>
+        <div class="space-y-1.5 mt-2 text-xs">
+          <div class="flex justify-between"><span class="text-zinc-500">in</span><span class="num text-zinc-300">{{ session.total_input_tokens|commas }}</span></div>
+          <div class="flex justify-between"><span class="text-zinc-500">out</span><span class="num text-zinc-300">{{ session.total_output_tokens|commas }}</span></div>
+          <div class="flex justify-between"><span class="text-zinc-500">cache write</span><span class="num text-zinc-500">{{ session.total_cache_write_tokens|commas }}</span></div>
+          <div class="flex justify-between"><span class="text-zinc-500">cache read</span><span class="num text-emerald-300">{{ session.total_cache_read_tokens|commas }}</span></div>
+          <div class="border-t border-zinc-800/60 pt-1.5 flex justify-between">
+            <span class="text-zinc-400">cost</span>
+            <span class="num text-zinc-200">{{ session.total_cost_usd|money }}</span>
+          </div>
+        </div>
+      </div>
+
+      {% if session.tool_counts %}
+        <div class="rounded-lg bg-zinc-900 border border-zinc-800 p-4">
+          <div class="text-xs uppercase tracking-wide text-zinc-500">Tools used</div>
+          <div class="space-y-1 mt-2 text-xs">
+            {% for name, count in session.tool_counts.items()|sort(attribute=1, reverse=true) %}
+              <div class="flex justify-between">
+                <span class="font-mono text-zinc-300">{{ name }}</span>
+                <span class="num text-zinc-400">{{ count }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="rounded-lg bg-zinc-900/60 border border-zinc-800/60 p-4 text-[10px] text-zinc-500 leading-relaxed">
+        <div class="text-zinc-400 mb-1 uppercase tracking-wide">file</div>
+        <div class="font-mono break-all">{{ session.source_path }}</div>
+        <div class="mt-2 num">{{ session.size_bytes|humanize_bytes }}</div>
+      </div>
+    </aside>
+
+    <!-- Transcript -->
+    <div class="lg:col-span-3 rounded-lg bg-zinc-900 border border-zinc-800 overflow-hidden">
+      <div class="px-4 py-2.5 text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-800/60 flex items-center gap-3">
+        <span>Transcript</span>
+        <span class="text-zinc-700">·</span>
+        <span class="num">{{ session.turn_count }} turns</span>
+      </div>
+
+      <div class="max-h-[80vh] overflow-y-auto scroll-thin">
+        {% if session.turn_count == 0 %}
+          <div class="px-4 py-10 text-center text-sm text-zinc-500">
+            This session has no parseable turns yet.
+          </div>
+        {% endif %}
+
+        {% for turn in session.turns %}
+          <article class="px-4 py-4 border-b border-zinc-800/60 {% if turn.kind == 'user' %}bg-emerald-500/[0.02]{% endif %}">
+            <div class="flex items-center gap-2 text-[10px] uppercase tracking-wide mb-2">
+              {% if turn.kind == 'user' %}
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span class="font-mono text-emerald-300">user</span>
+              {% elif turn.kind == 'assistant' %}
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-zinc-300"></span>
+                <span class="font-mono text-zinc-300">assistant</span>
+              {% elif turn.kind == 'tool_result' %}
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-zinc-500"></span>
+                <span class="font-mono text-zinc-400">tool_result</span>
+              {% else %}
+                <span class="inline-block w-1.5 h-1.5 rounded-full bg-zinc-600"></span>
+                <span class="font-mono text-zinc-500">{{ turn.kind }}</span>
+              {% endif %}
+              <span class="text-zinc-700">·</span>
+              <span class="font-mono text-zinc-500">turn {{ turn.index + 1 }}</span>
+              <span class="text-zinc-500 ml-auto num">
+                {% if turn.timestamp %}{{ turn.timestamp|ago }}{% endif %}
+                {% if turn.cost_usd > 0 %} · {{ turn.cost_usd|money_fine }}{% endif %}
+                {% if turn.usage and turn.usage.total %} · {{ turn.usage.total|commas }} tok{% endif %}
+              </span>
+            </div>
+
+            {% if turn.thinking %}
+              <details class="mb-3">
+                <summary class="cursor-pointer text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300">↓ thinking · {{ turn.thinking|length }} chars</summary>
+                <pre class="mt-2 p-3 rounded bg-zinc-950 border border-zinc-800/60 font-mono text-[11px] leading-relaxed text-zinc-500 whitespace-pre-wrap max-h-48 overflow-y-auto scroll-thin">{{ turn.thinking }}</pre>
+              </details>
+            {% endif %}
+
+            {% if turn.text %}
+              <div class="text-sm {% if turn.kind == 'user' %}text-zinc-200{% else %}text-zinc-300{% endif %} leading-relaxed mb-3 whitespace-pre-wrap">{{ turn.text }}</div>
+            {% endif %}
+
+            {% for call in turn.tool_calls %}
+              <div class="rounded border border-zinc-800/80 bg-zinc-950/40 overflow-hidden mb-2">
+                <div class="px-3 py-1.5 flex items-center gap-2 text-[10px] uppercase tracking-wide border-b border-zinc-800/60">
+                  <span class="font-mono text-zinc-300">{{ call.name }}</span>
+                  {% set summary = call.summary() %}
+                  {% if summary %}
+                    <span class="text-zinc-500 normal-case font-mono truncate">{{ summary|truncate(80, True, '…') }}</span>
+                  {% endif %}
+                </div>
+                {% if call.input %}
+                  <details>
+                    <summary class="cursor-pointer px-3 py-1.5 text-[10px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300">↓ input</summary>
+                    <pre class="px-3 pb-3 font-mono text-[11px] leading-relaxed text-zinc-400 overflow-x-auto max-h-60 scroll-thin whitespace-pre-wrap">{{ call.input|tojson_pretty }}</pre>
+                  </details>
+                {% endif %}
+              </div>
+            {% endfor %}
+
+            {% for result in turn.tool_results %}
+              <details class="text-xs">
+                <summary class="cursor-pointer text-zinc-500 hover:text-zinc-300 font-mono">
+                  ↓ {{ result.line_count }} lines · {{ result.byte_count|humanize_bytes }}{% if result.is_error %} · <span class="text-rose-300">error</span>{% endif %}
+                </summary>
+                <pre class="mt-2 p-3 rounded {% if result.is_error %}bg-rose-500/5 border-rose-500/30{% else %}bg-zinc-950 border-zinc-800/60{% endif %} border font-mono text-[11px] leading-relaxed text-zinc-400 overflow-x-auto max-h-72 scroll-thin whitespace-pre-wrap">{{ result.content }}</pre>
+              </details>
+            {% endfor %}
+          </article>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+{% endblock %}

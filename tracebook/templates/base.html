@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{% block title %}tracebook{% endblock %}</title>
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/app.css" />
+    {% block head %}{% endblock %}
+  </head>
+  <body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col">
+    <header class="border-b border-zinc-800 bg-zinc-900/60 sticky top-0 backdrop-blur z-20">
+      <div class="max-w-7xl mx-auto px-6 h-14 flex items-center gap-6">
+        <a href="/" class="font-mono text-lg font-semibold tracking-tight flex items-center gap-2">
+          <span class="text-emerald-400">T</span>
+          <span class="hidden sm:inline">tracebook</span>
+        </a>
+        <nav class="flex gap-5 text-sm">
+          <a href="/" class="py-1.5 border-b-2 {% if page == 'dashboard' %}border-emerald-400 text-zinc-100{% else %}border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700{% endif %} transition-colors">Dashboard</a>
+          <a href="/sessions" class="py-1.5 border-b-2 {% if page == 'sessions' %}border-emerald-400 text-zinc-100{% else %}border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700{% endif %} transition-colors">Sessions</a>
+          <a href="/cost" class="py-1.5 border-b-2 {% if page == 'cost' %}border-emerald-400 text-zinc-100{% else %}border-transparent text-zinc-400 hover:text-zinc-100 hover:border-zinc-700{% endif %} transition-colors">Cost</a>
+        </nav>
+        <div class="ml-auto flex items-center gap-4 text-xs text-zinc-500">
+          {% if kpis and kpis.sessions_total %}
+            <span class="hidden md:inline">local · <span class="num text-zinc-300">{{ kpis.sessions_total }}</span> sessions</span>
+          {% endif %}
+          {% if kpis and kpis.live_count %}
+            <span class="hidden md:flex items-center gap-1.5 text-emerald-300">
+              <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live pulse"></span>
+              <span class="num">{{ kpis.live_count }}</span>
+              <span>live</span>
+            </span>
+          {% endif %}
+          <span class="flex items-center gap-1.5">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400 dot-live"></span>
+            <span class="font-mono">v{{ version }}</span>
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-6 py-6 w-full flex-1">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="mt-auto border-t border-zinc-800 bg-zinc-950">
+      <div class="max-w-7xl mx-auto px-6 py-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-zinc-500 font-mono">
+        <span class="text-zinc-400">tracebook · v{{ version }}</span>
+        <span class="hidden md:inline">reads · {{ claude_projects }}</span>
+        <span class="ml-auto">
+          <a href="https://github.com/AndrewK404/tracebook" target="_blank" rel="noopener" class="hover:text-zinc-200 transition-colors">github ↗</a>
+        </span>
+      </div>
+    </footer>
+  </body>
+</html>
