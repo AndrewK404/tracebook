@@ -137,7 +137,7 @@
     window.NODE_DETAIL = {};
     window.dispatchEvent(new CustomEvent('tracebook:session-loading', { detail: { id } }));
     try {
-      const r = await fetch(`/api/sessions/${id}`);
+      const r = await fetch(`/api/sessions/${encodeURIComponent(id)}`, { cache: 'no-store' });
       if (!r.ok) {
         window._SESSION_ERROR = `session ${id} failed to load (${r.status})`;
         window.dispatchEvent(new CustomEvent('tracebook:session-error', { detail: { id, status: r.status } }));

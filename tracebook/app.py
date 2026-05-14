@@ -24,6 +24,17 @@ from tracebook.store import store
 app = FastAPI(title="tracebook", version=__version__)
 APP_STARTED_AT = datetime.now(tz=timezone.utc)
 
+
+@app.middleware("http")
+async def no_cache_local_assets(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 # Static files
 app.mount("/static", StaticFiles(directory=str(settings.static_dir)), name="static")
 

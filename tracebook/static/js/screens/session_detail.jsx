@@ -1716,10 +1716,14 @@ function SessionDetailScreen({ id }) {
     if (!hasDetail && window.loadSessionDetail) {
       setLoading(true);
       setLoadError(null);
-      window.loadSessionDetail(id).finally(() => setLoading(false));
+      window.loadSessionDetail(id)
+        .then(detail => {
+          if (!detail && window._SESSION_ERROR) setLoadError(window._SESSION_ERROR);
+        })
+        .catch(e => setLoadError(String(e && e.message ? e.message : e)))
+        .finally(() => setLoading(false));
     }
   }, [id]);
-  const [tab, setTab] = useStateSD('trace');
   const trace = detailObj?.trace || { totalDuration: 0, totalTokens: 0, totalCost: 0, nodes: [] };
   const nodeDetail = window.NODE_DETAIL || {};
   const firstNode = (trace.nodes && trace.nodes.length > 1)
@@ -1750,13 +1754,8 @@ function SessionDetailScreen({ id }) {
     }
   };
 
-  const tabs = [
-    { key: 'trace', label: 'trace' },
-    { key: 'context', label: 'context window' },
-  ];
-
   return (
-    <div className={`fade-up ${tab === 'trace' ? 'ls-trace-page' : ''}`}>
+    <div className="fade-up ls-trace-page">
       <PageHeader
         eyebrow={`sessions / ${session.short}`}
         title={singleLineText(session.preview)}
@@ -1780,24 +1779,12 @@ function SessionDetailScreen({ id }) {
         </>}
       />
 
-      <div className={`border-b flex items-center gap-0 mb-6 ${tab === 'trace' ? 'ls-detail-tabs' : ''}`} style={{ borderColor: 'var(--line-0)' }}>
-        {tabs.map(t => (
-          <button key={t.key} className={`tabline ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'context' && <ContextPanel session={session} />}
-
-      {tab === 'trace' && (
-        <CombinedTraceView
-          session={session}
-          trace={trace}
-          onCopyDialogue={copyDialogue}
-          copiedDialogue={copiedDialogue}
-        />
-      )}
+      <CombinedTraceView
+        session={session}
+        trace={trace}
+        onCopyDialogue={copyDialogue}
+        copiedDialogue={copiedDialogue}
+      />
     </div>
   );
 }
