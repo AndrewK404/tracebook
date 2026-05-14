@@ -7,6 +7,10 @@ function App() {
     if (!window.location.hash) window.location.hash = '#/dashboard';
   }, []);
 
+  React.useEffect(() => {
+    window.ensureFreshAssets?.();
+  }, [route]);
+
   let screen = null;
   let crumb = [{ label: 'leibniz' }];
 
@@ -44,13 +48,15 @@ function App() {
       <span className="font-mono" style={{ color: 'var(--ink-3)' }}>{window.SESSIONS.length} sessions</span>
     </>
   );
+  const wideScreen = route === '/sessions' || route.startsWith('/sessions/');
+  const mainWidthClass = wideScreen ? 'max-w-none' : 'max-w-[1280px]';
 
   return (
     <>
       <Rail route={route} />
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar breadcrumb={crumb} right={topRight} />
-        <main className="flex-1 px-7 py-7 max-w-[1280px] w-full mx-auto">
+        <main className={`flex-1 px-7 py-7 ${mainWidthClass} w-full mx-auto`}>
           {screen}
         </main>
         <ShellFooter />

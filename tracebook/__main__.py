@@ -16,7 +16,12 @@ log = logging.getLogger("tracebook")
 def main() -> None:
     store.refresh()
     log.info("tracebook · http://%s:%d", settings.host, settings.port)
-    log.info("watching %s · %d sessions indexed", settings.claude_projects, len(store.sessions))
+    log.info(
+        "watching %s and %s · %d sessions indexed",
+        settings.claude_projects,
+        settings.codex_sessions,
+        len(store.sessions),
+    )
     observer = start_watcher()
     try:
         uvicorn.run(

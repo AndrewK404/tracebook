@@ -24,11 +24,19 @@ class _Handler(FileSystemEventHandler):
 
 def start_watcher() -> Observer:
     observer = Observer()
-    path = settings.claude_projects
-    if path.exists():
-        observer.schedule(_Handler(), str(path), recursive=True)
-        log.info("watcher: watching %s", path)
-    else:
-        log.warning("watcher: %s does not exist — watcher not started", path)
+    watched = 0
+    seen: set[Path] = set()
+    for _, path in settings.transcript_roots:
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.exists():
+            observer.schedule(_Handler(), str(path), recursive=True)
+            log.info("watcher: watching %s", path)
+            watched += 1
+        else:
+            log.warning("watcher: %s does not exist — not watched", path)
+    if watched == 0:
+        log.warning("watcher: no transcript paths exist — watcher started idle")
     observer.start()
     return observer

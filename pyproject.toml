@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 tracebook = "tracebook.__main__:main"
+tracebook-hook = "tracebook.capture_hook:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tracebook"]

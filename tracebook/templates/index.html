@@ -7,21 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.tailwindcss.com"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        fontFamily: {
-          sans:    ['Inter', 'ui-sans-serif', 'system-ui'],
-          display: ['"Inter Tight"', 'Inter', 'ui-sans-serif'],
-          mono:    ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
-        },
-      }
-    }
-  }
-</script>
-<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/static/css/tailwind.css?v={{ asset_version }}">
+<link rel="stylesheet" href="/static/css/app.css?v={{ asset_version }}">
 </head>
 <body class="min-h-screen flex">
 
@@ -48,6 +35,7 @@
 
 <!-- Tweaks defaults -->
 <script>
+  window.__TRacebook_ASSET_VERSION__ = "{{ asset_version }}";
   window.__TWEAKS = {
     "sessionLayout": "compact",
     "rowDensity": "comfortable",
@@ -58,18 +46,18 @@
 </script>
 
 <!-- Data (async fetch from /api/*) -->
-<script type="text/babel" src="/static/js/data.jsx"></script>
+<script type="text/babel" src="/static/js/data.jsx?v={{ asset_version }}"></script>
 
 <!-- React components — all loaded statically; app.jsx waits for tracebook:ready -->
-<script type="text/babel" src="/static/js/tweaks-panel.jsx"></script>
-<script type="text/babel" src="/static/js/icons.jsx"></script>
-<script type="text/babel" src="/static/js/primitives.jsx"></script>
-<script type="text/babel" src="/static/js/shell.jsx"></script>
-<script type="text/babel" src="/static/js/screens/dashboard.jsx"></script>
-<script type="text/babel" src="/static/js/screens/sessions.jsx"></script>
-<script type="text/babel" src="/static/js/screens/session_detail.jsx"></script>
-<script type="text/babel" src="/static/js/screens/settings.jsx"></script>
-<script type="text/babel" src="/static/js/app.jsx"></script>
+<script type="text/babel" src="/static/js/tweaks-panel.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/icons.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/primitives.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/shell.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/screens/dashboard.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/screens/sessions.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/screens/session_detail.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/screens/settings.jsx?v={{ asset_version }}"></script>
+<script type="text/babel" src="/static/js/app.jsx?v={{ asset_version }}"></script>
 
 </body>
 </html>

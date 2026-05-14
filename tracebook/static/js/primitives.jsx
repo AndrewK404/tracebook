@@ -34,6 +34,32 @@ function formatDateRange(daysBack, daysSpan) {
 }
 window.formatDateRange = formatDateRange;
 
+// ─── Clipboard ───────────────────────────────────────────────────────────────
+async function copyText(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value);
+    } else {
+      const el = document.createElement('textarea');
+      el.value = value;
+      el.setAttribute('readonly', '');
+      el.style.position = 'fixed';
+      el.style.left = '-9999px';
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+    }
+    return true;
+  } catch (e) {
+    console.warn('copy failed', e);
+    return false;
+  }
+}
+window.copyText = copyText;
+
 // ─── Hash router ─────────────────────────────────────────────────────────────
 
 function useHashRoute() {
@@ -96,40 +122,55 @@ window.Card = Card;
 
 // ─── Sparkline (area + line) ─────────────────────────────────────────────────
 
-function Sparkline({ data, w = 120, h = 32, color = '#34d399' }) {
-  const max = Math.max(...data);
-  const min = Math.min(...data);
+function Sparkline({ data, w = 120, h = 32, color = '#34d399', labels = [], formatValue }) {
+  const [hover, setHover] = useState(null);
+  const values = Array.isArray(data) && data.length ? data : [0];
+  const max = Math.max(...values);
+  const min = Math.min(...values);
   const range = max - min || 1;
-  const pts = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w;
+  const pts = values.map((v, i) => {
+    const denom = Math.max(values.length - 1, 1);
+    const x = (i / denom) * w;
     const y = h - ((v - min) / range) * (h - 4) - 2;
     return [x, y];
   });
   const linePath = pts.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
   const areaPath = linePath + ` L ${w} ${h} L 0 ${h} Z`;
+  const activeIdx = hover == null ? pts.length - 1 : hover;
+  const active = pts[activeIdx] || pts[pts.length - 1] || [0, h / 2];
+  const valueLabel = formatValue ? formatValue(values[activeIdx], activeIdx) : formatNum(values[activeIdx]);
+  const dateLabel = labels[activeIdx] || '';
+  const onMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / Math.max(rect.width, 1)));
+    setHover(Math.round(ratio * (values.length - 1)));
+  };
   return (
-    <svg width={w} height={h} className="block">
-      <defs>
-        <linearGradient id={`spark-${color.slice(1)}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.18" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={areaPath} fill={`url(#spark-${color.slice(1)})`} />
-      <path d={linePath} fill="none" stroke={color} strokeWidth="1.25" />
-      <circle cx={pts[pts.length-1][0]} cy={pts[pts.length-1][1]} r="2" fill={color} />
-    </svg>
+    <div className="spark-wrap" onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+      {hover != null && (
+        <div className="spark-hover-label" style={{ color }}>
+          <span>{dateLabel}</span>
+          <strong>{valueLabel}</strong>
+        </div>
+      )}
+      <svg width={w} height={h} className="block">
+        <path d={areaPath} fill={color} opacity="0.06" />
+        {hover != null && <line x1={active[0]} x2={active[0]} y1="0" y2={h} stroke={color} strokeWidth="0.75" opacity="0.35" />}
+        <path d={linePath} fill="none" stroke={color} strokeWidth={hover != null ? "1.65" : "1.25"} />
+        <circle cx={active[0]} cy={active[1]} r={hover != null ? "3" : "2"} fill={color} />
+      </svg>
+    </div>
   );
 }
 window.Sparkline = Sparkline;
 
 // ─── KPI Block ───────────────────────────────────────────────────────────────
 
-function KPIBlock({ label, value, unit, delta, deltaLabel, deltaTooltip, spark, sparkColor = '#34d399', accent = false, sub }) {
+function KPIBlock({ label, value, unit, delta, deltaLabel, deltaTooltip, spark, sparkColor = '#34d399', sparkLabels, sparkValue, accent = false, sub }) {
   const deltaTone = delta > 0 ? 'delta-up' : delta < 0 ? 'delta-down' : 'delta-flat';
   const deltaArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '–';
   return (
-    <div className={`surface-1 p-5 relative overflow-hidden ${accent ? 'kpi-accent' : ''}`}>
+    <div className={`surface-1 p-5 relative overflow-visible ${accent ? 'kpi-accent' : ''}`}>
       <div className="t-eyebrow mb-4">{label}</div>
       <div className="flex items-end justify-between gap-3">
         <div className="min-w-0 flex-1">
@@ -153,7 +194,7 @@ function KPIBlock({ label, value, unit, delta, deltaLabel, deltaTooltip, spark, 
             </div>
           )}
         </div>
-        {spark && <Sparkline data={spark} color={sparkColor} />}
+        {spark && <Sparkline data={spark} color={sparkColor} labels={sparkLabels} formatValue={sparkValue} />}
       </div>
     </div>
   );
@@ -175,13 +216,13 @@ window.Pill = Pill;
 
 function PageHeader({ title, subtitle, right, eyebrow }) {
   return (
-    <div className="flex items-end justify-between gap-6 mb-7">
-      <div>
+    <div className="flex items-end justify-between gap-6 mb-7 min-w-0">
+      <div className="min-w-0 flex-1">
         {eyebrow && <div className="t-eyebrow mb-2">{eyebrow}</div>}
-        <h1 className="t-h1">{title}</h1>
-        {subtitle && <p className="t-small mt-1.5 max-w-xl">{subtitle}</p>}
+        <h1 className="t-h1 break-words">{title}</h1>
+        {subtitle && <p className="t-small mt-1.5 max-w-xl break-all">{subtitle}</p>}
       </div>
-      {right && <div className="flex items-center gap-2">{right}</div>}
+      {right && <div className="flex items-center gap-2 flex-shrink-0">{right}</div>}
     </div>
   );
 }

@@ -48,13 +48,7 @@ const Icon = {
   Globe: makeIcon(<><circle cx="12" cy="12" r="9" /><line x1="3" y1="12" x2="21" y2="12" /><path d="M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" /></>),
   Logo: ({ size = 22, className = '' }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
-      <defs>
-        <linearGradient id="lg-l" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#34d399" />
-          <stop offset="100%" stopColor="#6ee7b7" />
-        </linearGradient>
-      </defs>
-      <rect x="2" y="2" width="20" height="20" rx="5" fill="url(#lg-l)" />
+      <rect x="2" y="2" width="20" height="20" rx="5" fill="#34d399" />
       <path d="M8 6 L8 18 L16 18" stroke="#08080a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
     </svg>
   ),

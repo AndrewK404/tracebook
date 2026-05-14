@@ -7,7 +7,8 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from tracebook.parsers.claude import Session, parse_session
+from tracebook.parsers.claude import Session, parse_session as parse_claude_session
+from tracebook.parsers.codex import parse_session as parse_codex_session
 from tracebook.settings import settings
 
 
@@ -18,6 +19,7 @@ class Store:
         self._sessions: dict[str, Session] = {}
         # path → mtime (for invalidation)
         self._mtimes: dict[Path, float] = {}
+        self._path_ids: dict[Path, str] = {}
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -26,29 +28,43 @@ class Store:
         return self._sessions
 
     def refresh(self) -> None:
-        """Walk ~/.claude/projects/ and parse all new/changed JSONL files."""
-        root = settings.claude_projects
-        if not root.exists():
-            return
+        """Walk configured transcript roots and parse all new/changed JSONL files."""
+        parsers = {
+            "claude": parse_claude_session,
+            "codex": parse_codex_session,
+        }
 
         seen_paths: set[Path] = set()
         with self._lock:
-            for jsonl in sorted(root.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
-                seen_paths.add(jsonl)
-                try:
-                    mtime = jsonl.stat().st_mtime
-                except OSError:
+            for kind, root in settings.transcript_roots:
+                if not root.exists():
                     continue
-                if self._mtimes.get(jsonl) == mtime:
-                    continue  # unchanged
-                sess = parse_session(jsonl)
-                if sess:
-                    self._sessions[sess.id] = sess
-                    self._mtimes[jsonl] = mtime
+                parser = parsers[kind]
+                for jsonl in sorted(root.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+                    if kind == "claude" and "subagents" in jsonl.parts:
+                        continue
+                    seen_paths.add(jsonl)
+                    try:
+                        mtime = jsonl.stat().st_mtime
+                    except OSError:
+                        continue
+                    if self._mtimes.get(jsonl) == mtime:
+                        continue  # unchanged
+                    sess = parser(jsonl)
+                    if sess:
+                        previous_id = self._path_ids.get(jsonl)
+                        if previous_id and previous_id != sess.id:
+                            self._sessions.pop(previous_id, None)
+                        self._sessions[sess.id] = sess
+                        self._mtimes[jsonl] = mtime
+                        self._path_ids[jsonl] = sess.id
 
             # remove sessions whose files are gone
             gone = set(self._mtimes) - seen_paths
             for p in gone:
+                sid = self._path_ids.pop(p, None)
+                if sid:
+                    self._sessions.pop(sid, None)
                 self._mtimes.pop(p, None)
 
     def invalidate(self, path: Path) -> None:

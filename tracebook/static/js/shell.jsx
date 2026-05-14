@@ -3,6 +3,10 @@
 function Rail({ route }) {
   const isActive = (path) => route === path || (path === '/dashboard' && route === '/');
   const sessionsActive = route === '/sessions' || route.startsWith('/sessions/');
+  const about = window._ABOUT || {};
+  const port = about.port || 4178;
+  const daemon = about.daemon || 'running';
+  const uptime = about.uptime || '—';
 
   return (
     <aside className="w-[232px] flex-shrink-0 flex flex-col border-r" style={{ borderColor: 'var(--line-0)', background: 'var(--bg-1)' }}>
@@ -38,16 +42,16 @@ function Rail({ route }) {
           <span style={{ color: 'var(--ink-4)' }}>daemon</span>
           <span className="flex items-center gap-1.5 text-emerald-300">
             <StatusDot kind="emerald" pulse size={5} />
-            running
+            {daemon}
           </span>
         </div>
         <div className="flex items-center justify-between t-meta">
           <span style={{ color: 'var(--ink-4)' }}>port</span>
-          <span style={{ color: 'var(--ink-2)' }}>127.0.0.1:4178</span>
+          <span style={{ color: 'var(--ink-2)' }}>127.0.0.1:{port}</span>
         </div>
         <div className="flex items-center justify-between t-meta">
           <span style={{ color: 'var(--ink-4)' }}>uptime</span>
-          <span style={{ color: 'var(--ink-2)' }}>2h 14m</span>
+          <span style={{ color: 'var(--ink-2)' }}>{uptime}</span>
         </div>
       </div>
     </aside>
@@ -86,6 +90,7 @@ function TopBar({ breadcrumb, right }) {
 window.TopBar = TopBar;
 
 function ShellFooter() {
+  const about = window._ABOUT || {};
   return (
     <footer className="border-t mt-auto" style={{ borderColor: 'var(--line-0)' }}>
       <div className="px-7 py-3 flex items-center justify-between t-meta" style={{ fontSize: '10.5px', color: 'var(--ink-4)' }}>
@@ -95,7 +100,7 @@ function ShellFooter() {
           <span>~/.claude/projects/</span>
         </div>
         <div className="flex items-center gap-3">
-          <span>pid 38172</span>
+          <span>pid {about.pid || '—'}</span>
           <span style={{ color: 'var(--line-2)' }}>·</span>
           <span>apache 2.0</span>
           <span style={{ color: 'var(--line-2)' }}>·</span>

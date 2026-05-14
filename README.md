@@ -46,6 +46,23 @@ Open <http://127.0.0.1:4178>.
 
 **Requirements:** Python 3.11+, [uv](https://github.com/astral-sh/uv).
 
+## Optional Hook Capture
+
+Tracebook can also receive Claude Code or Codex hook payloads through the
+`tracebook-hook` script. The hook writes a sanitized event stream to
+`~/.tracebook/hooks.jsonl`; it keeps tool names, commands, file paths, prompts,
+and short output previews while clipping large content and images.
+
+Use it from `PreToolUse`, `PostToolUse`, `PostToolBatch`, `SessionStart`, or
+`UserPromptSubmit` hooks:
+
+```json
+{
+  "type": "command",
+  "command": "uv run --project /path/to/tracebook tracebook-hook"
+}
+```
+
 ## Stack
 
 - Python 3.11+ · FastAPI · Jinja2 · watchdog

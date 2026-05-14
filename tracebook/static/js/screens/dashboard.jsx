@@ -8,12 +8,6 @@ const PROVIDERS = [
   { value: 'openai', label: 'openai' },
   { value: 'google', label: 'google' },
 ];
-const MODELS = [
-  { value: 'all', label: 'all models' },
-  { value: 'claude-opus-4', label: 'opus 4' },
-  { value: 'claude-sonnet-4-5', label: 'sonnet 4.5' },
-  { value: 'claude-haiku-4-5', label: 'haiku 4.5' },
-];
 const PERIODS = [
   { value: '7', label: '7d' },
   { value: '14', label: '14d' },
@@ -23,7 +17,41 @@ const PERIODS = [
   { value: 'all', label: 'all' },
 ];
 
+function providerOptions() {
+  const seen = new Map(PROVIDERS.map(p => [p.value, p]));
+  ((window.DASH_FILTERS && window.DASH_FILTERS.providers) || []).forEach(p => {
+    seen.set(p.value, { value: p.value, label: `${p.label} · ${p.count}` });
+  });
+  return [...seen.values()];
+}
+
+function modelLabel(m) {
+  return String(m || '')
+    .replace(/^claude-/, '')
+    .replace(/-20\d{6,8}$/, '')
+    .replace(/-/g, ' ');
+}
+
+function modelOptions(provider) {
+  const rows = [];
+  const add = (value, count) => {
+    if (!value || rows.some(r => r.value === value)) return;
+    rows.push({ value, label: count ? `${modelLabel(value)} · ${count}` : modelLabel(value) });
+  };
+  const facets = (window.DASH_FILTERS && window.DASH_FILTERS.modelsByProvider) || {};
+  const providers = provider === 'all' ? Object.keys(facets) : [provider];
+  providers.forEach(p => (facets[p] || []).forEach(m => add(m.value, m.count)));
+  if (rows.length === 0) {
+    (window.PRICING || [])
+      .filter(p => provider === 'all' || p.provider === provider)
+      .slice(0, 12)
+      .forEach(p => add(p.model));
+  }
+  return [{ value: 'all', label: 'all models' }, ...rows];
+}
+
 function FilterBar({ provider, setProvider, model, setModel, period, setPeriod }) {
+  const models = modelOptions(provider);
   return (
     <div className="surface-1 px-4 py-3 mb-7 flex items-center gap-3 flex-wrap">
       <div className="flex items-center gap-2 text-[12px]" style={{ color: 'var(--ink-3)' }}>
@@ -31,8 +59,8 @@ function FilterBar({ provider, setProvider, model, setModel, period, setPeriod }
         <span className="t-eyebrow">filters</span>
       </div>
       <div className="h-4 w-px" style={{ background: 'var(--line-1)' }} />
-      <window.Select label="provider" value={provider} onChange={setProvider} options={PROVIDERS} />
-      <window.Select label="model" value={model} onChange={setModel} options={MODELS} />
+      <window.Select label="provider" value={provider} onChange={setProvider} options={providerOptions()} />
+      <window.Select label="model" value={model} onChange={setModel} options={models} />
       <div className="flex items-center gap-1 ml-auto">
         <span className="t-eyebrow mr-1" style={{ color: 'var(--ink-4)' }}>period</span>
         {PERIODS.map(p => (
@@ -45,12 +73,17 @@ function FilterBar({ provider, setProvider, model, setModel, period, setPeriod }
 
 // ─── Bar chart with hover tooltip ────────────────────────────────────────────
 
-function BarChart({ data }) {
+function BarChart({ data, series, metric = 'tokens', showValues = false }) {
   const [hover, setHover] = useStateD(null); // tooltip only on hover
-  const W = 920, H = 240, P = { l: 44, r: 14, t: 16, b: 28 };
+  const W = 1440, H = 300, P = { l: 52, r: 18, t: 24, b: 34 };
   const innerW = W - P.l - P.r, innerH = H - P.t - P.b;
-  const max = Math.max(...data.map(d => d.total)) * 1.1;
+  const valueFor = (d, s) => metric === 'cost' ? (d[`${s.key}Cost`] || 0) : (d[s.key] || 0);
+  const totalFor = (d) => metric === 'cost' ? (d.cost || 0) : (d.total || 0);
+  const labelFor = (v, opts = {}) => metric === 'cost' ? `$${v.toFixed(v >= 10 ? 0 : 2)}` : window.formatNum(v, opts);
+  const unitLabel = metric === 'cost' ? 'estimated cost' : 'output tokens';
+  const max = Math.max(1, Math.max(...data.map(totalFor)) * 1.14);
   const barW = innerW / data.length;
+  const valueLabelStep = data.length > 45 ? 4 : data.length > 28 ? 3 : data.length > 18 ? 2 : 1;
   const x = (i) => P.l + i * barW + barW * 0.18;
   const y = (v) => P.t + innerH - (v / max) * innerH;
   const segH = (v) => (v / max) * innerH;
@@ -60,7 +93,7 @@ function BarChart({ data }) {
 
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full h-[260px]"
+      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full h-auto"
         onMouseLeave={() => setHover(null)}>
         {/* gridlines */}
         {[0, 0.25, 0.5, 0.75, 1].map((p, i) => {
@@ -69,7 +102,7 @@ function BarChart({ data }) {
             <g key={i}>
               <line x1={P.l} x2={W - P.r} y1={yy} y2={yy} stroke="#1f1f24" strokeDasharray="2 4" />
               <text x={P.l - 8} y={yy + 3} fill="#52525b" fontSize="9.5" fontFamily="JetBrains Mono" textAnchor="end">
-                {window.formatNum(max * p, { digits: 2 })}
+                {labelFor(max * p, { digits: 2 })}
               </text>
             </g>
           );
@@ -78,28 +111,30 @@ function BarChart({ data }) {
         {data.map((d, i) => {
           const isHover = hover === i;
           const baseOpacity = isHover ? 1 : 0.85;
-          const yHaiku = y(d.haiku);
-          const ySonnet = y(d.haiku + d.sonnet);
-          const yOpus = y(d.total);
+          let acc = 0;
           return (
             <g key={i}
               onMouseEnter={() => setHover(i)}
               style={{ cursor: 'pointer' }}>
               {/* hit area */}
               <rect x={P.l + i * barW} y={P.t} width={barW} height={innerH} fill="transparent" />
-              {/* haiku (bottom) */}
-              <rect x={x(i)} y={yHaiku} width={w} height={segH(d.haiku)}
-                fill="#a78bfa" opacity={baseOpacity} rx="1.5" />
-              {/* sonnet */}
-              <rect x={x(i)} y={ySonnet} width={w} height={segH(d.sonnet)}
-                fill="#7dd3fc" opacity={baseOpacity} rx="1.5" />
-              {/* opus (top) */}
-              <rect x={x(i)} y={yOpus} width={w} height={segH(d.opus)}
-                fill="#34d399" opacity={baseOpacity} rx="1.5" />
+              {series.map(s => {
+                const v = valueFor(d, s);
+                const h = segH(v);
+                const yy = y(acc + v);
+                acc += v;
+                if (v <= 0) return null;
+                return <rect key={s.key} x={x(i)} y={yy} width={w} height={h} fill={s.color} opacity={baseOpacity} rx="1.5" />;
+              })}
               {/* hover ring */}
               {isHover && (
-                <rect x={x(i) - 2} y={yOpus - 2} width={w + 4} height={innerH - (yOpus - P.t) + 2}
+                <rect x={x(i) - 2} y={y(totalFor(d)) - 2} width={w + 4} height={innerH - (y(totalFor(d)) - P.t) + 2}
                   fill="none" stroke="#34d399" strokeWidth="0.75" strokeDasharray="2 2" rx="2" opacity="0.5" />
+              )}
+              {showValues && totalFor(d) > 0 && i % valueLabelStep === 0 && (
+                <text x={x(i) + w/2} y={Math.max(10, y(totalFor(d)) - 5)} fill="#e4e4e7" fontSize="9" fontFamily="JetBrains Mono" textAnchor="middle">
+                  {labelFor(totalFor(d))}
+                </text>
               )}
             </g>
           );
@@ -112,20 +147,28 @@ function BarChart({ data }) {
         ))}
       </svg>
       <div className="absolute top-3 right-4 flex items-center gap-3 text-[10.5px] font-mono">
-        <span className="flex items-center gap-1.5" style={{ color: '#6ee7b7' }}><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#34d399' }} /> opus</span>
-        <span className="flex items-center gap-1.5" style={{ color: '#bae6fd' }}><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#7dd3fc' }} /> sonnet</span>
-        <span className="flex items-center gap-1.5" style={{ color: '#c4b5fd' }}><span className="w-2.5 h-2.5 rounded-sm" style={{ background: '#a78bfa' }} /> haiku</span>
+        {series.map(s => (
+          <span key={s.key} className="flex items-center gap-1.5" style={{ color: s.color }}>
+            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} /> {s.label}
+          </span>
+        ))}
       </div>
       {/* hover tooltip */}
       {cur && (
         <div className="absolute top-3 left-12 surface-2 px-3 py-2.5 pointer-events-none" style={{ minWidth: 180 }}>
           <div className="t-eyebrow mb-1.5">{cur.today ? 'today' : cur.day}</div>
-          <div className="display-tight font-semibold text-[18px] num leading-none mb-1" style={{ color: 'var(--ink-0)' }}>{window.formatNum(cur.total, { digits: 2 })}</div>
-          <div className="t-meta mb-2.5" style={{ fontSize: '10.5px' }}>${cur.cost.toFixed(2)} · total tokens</div>
+          <div className="display-tight font-semibold text-[18px] num leading-none mb-1" style={{ color: 'var(--ink-0)' }}>{labelFor(totalFor(cur), { digits: 2 })}</div>
+          <div className="t-meta mb-2.5" style={{ fontSize: '10.5px' }}>
+            {metric === 'cost' ? `${window.formatNum(cur.total, { digits: 2 })} output tokens` : `$${cur.cost.toFixed(2)} cost`} · {unitLabel}
+          </div>
           <div className="space-y-1 text-[11px] font-mono">
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#34d399' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">opus</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.opus)}</span></div>
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#7dd3fc' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">sonnet</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.sonnet)}</span></div>
-            <div className="flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-sm" style={{ background: '#a78bfa' }} /><span style={{ color: 'var(--ink-3)' }} className="flex-1">haiku</span><span className="num" style={{ color: 'var(--ink-1)' }}>{window.formatNum(cur.haiku)}</span></div>
+            {series.map(s => (
+              <div key={s.key} className="flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-sm" style={{ background: s.color }} />
+                <span style={{ color: 'var(--ink-3)' }} className="flex-1">{s.label}</span>
+                <span className="num" style={{ color: 'var(--ink-1)' }}>{labelFor(valueFor(cur, s))}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -149,34 +192,39 @@ function CachePanel() {
   const readRatio = readT / total;
   const writeAmort = writeT > 0 ? (readT / writeT).toFixed(2) : '—';
 
-  // ratio sparkline — use SPARK_CACHE
   const SERIES = window.SPARK_CACHE || Array(12).fill(readRatio);
 
   return (
-    <Card padding="p-5">
+    <Card padding="p-4" className="dashboard-cache-card">
       {/* big ratio */}
-      <div className="flex items-start justify-between mb-5">
+      <div className="flex items-start justify-between mb-3">
         <div>
           <div className="flex items-center gap-1.5 t-eyebrow mb-2">
             cache read ratio
             <span title="cache_read_input_tokens / total input tokens. Higher = more reuse of cached prompts → cheaper requests." style={{ color: 'var(--ink-4)', fontSize: '10px', cursor: 'help' }}>ⓘ</span>
           </div>
-          <div className="display-tight font-semibold text-[44px] num leading-none" style={{ color: 'var(--ink-0)' }}>
-            {(readRatio * 100).toFixed(1)}<span className="text-[24px]" style={{ color: 'var(--ink-4)' }}>%</span>
-          </div>
-          <div className="t-meta mt-1.5 flex items-center gap-1.5" style={{ fontSize: '10.5px' }}>
-            <span style={{ color: '#6ee7b7' }}>higher is better</span>
-            <span style={{ color: 'var(--ink-4)' }}>·</span>
-            <span>cached reads cost ~10% of fresh input</span>
+          <div className="cache-ratio-value display-tight font-semibold text-[40px] num leading-none" style={{ color: 'var(--ink-0)' }}>
+            <span>{(readRatio * 100).toFixed(1)}</span><span className="cache-ratio-symbol text-[22px]" style={{ color: 'var(--ink-4)' }}>%</span>
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <Sparkline data={SERIES} w={140} h={42} color="#34d399" />
+          <Sparkline
+            data={SERIES}
+            w={140}
+            h={42}
+            color="#34d399"
+            labels={sparkPointLabels(window._DASH_PERIOD || '14', SERIES.length)}
+            formatValue={(v) => `${((v || 0) * 100).toFixed(1)}%`}
+          />
         </div>
+      </div>
+      <div className="cache-read-note">
+        <span>higher is better</span>
+        <span>cached reads cost ~10% of fresh input</span>
       </div>
 
       {/* breakdown */}
-      <div className="surface-2 p-4">
+      <div className="surface-2 p-3">
         <div className="flex items-center justify-between mb-3">
           <span className="text-[12.5px] text-zinc-200 font-medium">cache usage breakdown</span>
           <span className="font-mono num text-[11.5px]" style={{ color: 'var(--ink-2)' }}>{window.formatNum(total, { digits: 2 })} input</span>
@@ -226,6 +274,9 @@ const PIE_COLORS = ['#34d399', '#7dd3fc', '#a78bfa', '#fbbf24', '#fb7185', '#67e
 function ProjectPie({ rows }) {
   const [hover, setHover] = useStateD(null);
   const totalAll = rows.reduce((a, r) => a + r.cost, 0);
+  if (totalAll <= 0) {
+    return <div className="py-8 text-center t-small" style={{ color: 'var(--ink-4)' }}>no spend yet</div>;
+  }
 
   // Group slices < 2% into "other" to declutter
   const big = rows.filter(r => r.cost / totalAll >= 0.02);
@@ -257,9 +308,11 @@ function ProjectPie({ rows }) {
   });
 
   const cur = hover != null ? segs[hover] : null;
+  const centerLabel = cur ? String(cur.project || '') : 'total spend';
+  const centerTitle = centerLabel.length > 17 ? `${centerLabel.slice(0, 14)}...` : centerLabel;
 
   return (
-    <div className="flex items-center gap-5">
+    <div className="project-pie flex items-center gap-5">
       <div className="relative flex-shrink-0" style={{ width: 200, height: 200 }}
         onMouseLeave={() => setHover(null)}>
         <svg width="200" height="200" viewBox="0 0 200 200">
@@ -272,13 +325,13 @@ function ProjectPie({ rows }) {
                 style={{ cursor: 'pointer', transition: 'opacity 120ms' }} />
             );
           })}
-          <text x={cx} y={cy - 6} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill="var(--ink-3)">
-            {cur ? cur.project : 'total spend'}
+          <text x={cx} y={cy - 15} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="8.5" fill="var(--ink-3)">
+            {centerTitle}
           </text>
-          <text x={cx} y={cy + 12} textAnchor="middle" fontFamily="Inter Tight" fontWeight="600" fontSize="22" letterSpacing="-0.02em" fill="#f4f4f5">
+          <text x={cx} y={cy + 8} textAnchor="middle" fontFamily="Inter Tight" fontWeight="600" fontSize="22" fill="#f4f4f5">
             {cur ? `${(cur.portion * 100).toFixed(1)}%` : `$${total.toFixed(0)}`}
           </text>
-          <text x={cx} y={cy + 28} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="9" fill="var(--ink-4)">
+          <text x={cx} y={cy + 27} textAnchor="middle" fontFamily="JetBrains Mono" fontSize="8.5" fill="var(--ink-4)">
             {cur ? `$${cur.cost.toFixed(2)}` : `${window.formatNum(tokensTotal)} tokens`}
           </text>
         </svg>
@@ -315,6 +368,14 @@ function ProjectPie({ rows }) {
   );
 }
 
+function sparkPointLabels(period, points = 12) {
+  const days = period === 'all' ? 90 : Number(period) || 14;
+  const bucketMs = (days * 24 * 60 * 60 * 1000) / Math.max(points, 1);
+  const now = Date.now();
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return Array.from({ length: points }, (_, i) => fmt(new Date(now - bucketMs * (points - 1 - i))));
+}
+
 // ─── DashboardScreen ─────────────────────────────────────────────────────────
 
 function DashboardScreen() {
@@ -323,6 +384,8 @@ function DashboardScreen() {
   const [period, setPeriod] = useStateD('14');
   const [refreshKey, setRefreshKey] = useStateD(0);
   const [loading, setLoading] = useStateD(false);
+  const [chartMetric, setChartMetric] = useStateD('tokens');
+  const [showBarValues, setShowBarValues] = useStateD(false);
 
   const dash = window._DASHBOARD;
   const kpis = dash ? dash.kpis : null;
@@ -343,6 +406,11 @@ function DashboardScreen() {
     handleRefresh();
   }, [provider, model, period]);
 
+  React.useEffect(() => {
+    const values = modelOptions(provider).map(o => o.value);
+    if (!values.includes(model)) setModel('all');
+  }, [provider]);
+
   const totalTokens = kpis ? fmtTokens(kpis.tokens.value) : '—';
   const totalCost   = kpis ? '$' + kpis.cost.value.toFixed(2) : '—';
   const sessions    = kpis ? kpis.sessions.value : 0;
@@ -355,14 +423,20 @@ function DashboardScreen() {
   const deltaTooltip  = `Comparing ${currentRange} (current) vs ${previousRange} (previous ${periodDays} days)`;
 
   const chart = window.CHART_14D || [];
+  const chartSeries = window.CHART_SERIES || [];
   const pie   = window.TOKENS_BY_PROJECT || [];
+  const sparkLabels = sparkPointLabels(period, (window.SPARK_TOKENS || []).length || 12);
+  const avgSpark = (window.SPARK_COST || []).map((cost, i) => {
+    const count = (window.SPARK_SESSIONS || [])[i] || 0;
+    return count ? cost / count : 0;
+  });
 
   return (
     <div className="fade-up">
       <PageHeader
         eyebrow="dashboards / overview"
         title="overview"
-        subtitle="estimated cost, throughput, cache and token spend across all your sessions."
+        subtitle="estimated cost, generated output, cache and spend across all your sessions."
         right={<>
           <button className="btn btn-ghost" onClick={handleRefresh}><window.Icon.Refresh size={13} /> refresh</button>
         </>}
@@ -376,32 +450,44 @@ function DashboardScreen() {
 
       {/* KPI strip */}
       <div className="grid grid-cols-4 gap-4 mb-7">
-        <KPIBlock label="tokens" value={totalTokens} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_TOKENS} sparkColor="#7dd3fc" />
-        <KPIBlock label="sessions" value={String(sessions)} delta={kpis ? kpis.sessions.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_SESSIONS} sparkColor="#a78bfa" />
-        <KPIBlock label="estimated cost" value={totalCost} delta={kpis ? kpis.cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_COST} accent />
-        <KPIBlock label="avg / session" value={avgCost} delta={kpis ? kpis.avg_cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} sparkColor="#fbbf24" />
+        <KPIBlock label="output tokens" value={totalTokens} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_TOKENS} sparkColor="#7dd3fc" sparkLabels={sparkLabels} sparkValue={(v) => window.formatNum((v || 0) * 1000)} />
+        <KPIBlock label="sessions" value={String(sessions)} delta={kpis ? kpis.sessions.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_SESSIONS} sparkColor="#a78bfa" sparkLabels={sparkLabels} sparkValue={(v) => `${Math.round(v || 0)}`} />
+        <KPIBlock label="estimated cost" value={totalCost} delta={kpis ? kpis.cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_COST} sparkLabels={sparkLabels} sparkValue={(v) => `$${(v || 0).toFixed(2)}`} accent />
+        <KPIBlock label="avg / session" value={avgCost} delta={kpis ? kpis.avg_cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={avgSpark} sparkColor="#fbbf24" sparkLabels={sparkLabels} sparkValue={(v) => `$${(v || 0).toFixed(2)}`} />
       </div>
 
       {/* Throughput bar chart */}
-      <Eyebrow num={1} label="throughput" meta={`${period === 'all' ? 'all time' : period + ' days'} · stacked by model · hover any day`} right={
-        <span className="t-meta">{totalTokens} total tokens · {totalCost}</span>
+      <Eyebrow num={1} label="throughput" meta={`${period === 'all' ? 'all time' : period + ' days'} · stacked by model · ${chartMetric === 'cost' ? 'estimated cost' : 'output tokens'}`} right={
+        <div className="flex items-center gap-2">
+          <span className="t-meta">{totalTokens} output · {totalCost}</span>
+          <div className="flex items-center gap-1">
+            <window.Pill active={chartMetric === 'tokens'} onClick={() => setChartMetric('tokens')}><window.Icon.Database size={11} /> tokens</window.Pill>
+            <window.Pill active={chartMetric === 'cost'} onClick={() => setChartMetric('cost')}><window.Icon.Coin size={11} /> dollars</window.Pill>
+            <window.Pill active={showBarValues} onClick={() => setShowBarValues(v => !v)}><window.Icon.Toggle size={11} /> values</window.Pill>
+          </div>
+        </div>
       } />
-      <Card padding="p-5" className="mb-7">
+      <Card padding="p-0" className="mb-7 overflow-hidden">
         {chart.length > 0
-          ? <BarChart data={chart} />
+          ? <BarChart
+              data={chart}
+              series={chartSeries.length ? chartSeries : [{ key: 'other', label: 'other', color: '#a1a1aa' }]}
+              metric={chartMetric}
+              showValues={showBarValues}
+            />
           : <div className="py-8 text-center t-small" style={{ color: 'var(--ink-4)' }}>no data for this period</div>
         }
       </Card>
 
       {/* Cache + Tokens by project */}
-      <div className="grid grid-cols-2 gap-5 mb-7">
+      <div className="dashboard-cache-project-grid grid grid-cols-2 gap-5 mb-7">
         <div>
           <Eyebrow num={2} label="prompt caching" meta="composition & read ratio" />
           <CachePanel />
         </div>
         <div>
-          <Eyebrow num={3} label="tokens by project" meta={`${pie.length} projects · share of spend`} right={<a href="#/sessions" className="t-meta hover:text-zinc-100 flex items-center gap-1">all sessions <window.Icon.ArrowRight size={11} /></a>} />
-          <Card padding="p-5">
+          <Eyebrow num={3} label="output by project" meta={`${pie.length} projects · share of spend`} right={<a href="#/sessions" className="t-meta hover:text-zinc-100 flex items-center gap-1">all sessions <window.Icon.ArrowRight size={11} /></a>} />
+          <Card padding="p-5" className="dashboard-project-card">
             {pie.length > 0
               ? <ProjectPie rows={pie} />
               : <div className="py-8 text-center t-small" style={{ color: 'var(--ink-4)' }}>no sessions yet</div>
@@ -428,7 +514,14 @@ function DashboardScreen() {
                 <td className="px-4 py-3.5 font-mono">
                   <div className="flex items-center gap-2">
                     {s.live ? <StatusDot kind="emerald" pulse size={5} /> : <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--ink-4)' }} />}
-                    <span style={{ color: 'var(--ink-2)' }}>{s.short}</span>
+                    <button
+                      className="hover:text-zinc-50"
+                      style={{ color: 'var(--ink-2)' }}
+                      title={`copy ${s.resumeCommand || s.id}`}
+                      onClick={(e) => { e.stopPropagation(); window.copyText(s.resumeCommand || s.id); }}
+                    >
+                      {s.short}
+                    </button>
                   </div>
                 </td>
                 <td className="px-4 py-3.5 truncate max-w-[320px]" style={{ color: 'var(--ink-1)' }}>{s.preview}</td>
