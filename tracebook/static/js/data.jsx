@@ -242,9 +242,15 @@
   }
   window.loadSessionDetail = loadSessionDetail;
 
+  function sessionIdFromHash(hash = window.location.hash) {
+    const parts = String(hash || '').replace(/^#/, '').split('/').filter(Boolean);
+    return parts[0] === 'sessions' ? (parts[1] || '') : '';
+  }
+  window.sessionIdFromHash = sessionIdFromHash;
+
   // Load detail for the initial route
-  const hashId = window.location.hash.replace('#/sessions/', '');
-  if (window.location.hash.startsWith('#/sessions/') && hashId) {
+  const hashId = sessionIdFromHash();
+  if (hashId) {
     await loadSessionDetail(hashId);
   }
 
@@ -252,10 +258,8 @@
   window.addEventListener('hashchange', async () => {
     const h = window.location.hash;
     if (window.ensureFreshAssets && !(await window.ensureFreshAssets())) return;
-    if (h.startsWith('#/sessions/')) {
-      const id = h.replace('#/sessions/', '');
-      if (id) await loadSessionDetail(id);
-    }
+    const id = sessionIdFromHash(h);
+    if (id) await loadSessionDetail(id);
   });
 
   // ── expose fetchDashboard for the filter bar refresh button ──────────────

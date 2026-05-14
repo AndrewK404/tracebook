@@ -1170,12 +1170,10 @@ function TranscriptBlock({ turn }) {
         </div>
         {command ? (
           <div className="transcript-command">
-            <span>$</span>
             <CodeSnippet text={command} shell={!isPatch} forceDiff={isPatch} />
           </div>
         ) : file ? (
           <div className="transcript-command file">
-            <span>file</span>
             <CodeSnippet text={file} />
           </div>
         ) : turn.text ? (
@@ -1248,6 +1246,121 @@ function turnTimelineRow(turn, index, originMs, totalMs, traceNodes) {
   };
 }
 
+function isRootTraceNode(node) {
+  return !node || !node.parent;
+}
+
+function isToolTraceNode(node) {
+  return node && (['tool', 'mcp', 'skill'].includes(node.type) || node.detail?.attributes?.tool);
+}
+
+function isFailedTraceNode(node) {
+  const status = String(node?.status || '').toLowerCase();
+  return ['failed', 'error', 'cancelled'].includes(status);
+}
+
+function durationSeverity(durationMs, maxDurationMs = 0) {
+  const d = Math.max(0, Number(durationMs) || 0);
+  const max = Math.max(1, Number(maxDurationMs) || 0);
+  if (d >= 10000 || d >= max * 0.55) return 'red';
+  if (d >= 2500 || d >= max * 0.22) return 'yellow';
+  return 'green';
+}
+
+function durationSeverityClass(durationMs, maxDurationMs) {
+  return `severity-${durationSeverity(durationMs, maxDurationMs)}`;
+}
+
+function summarizePromptSegment(segment) {
+  const stats = {
+    wallMs: Math.max(0, segment.endMs - segment.startMs),
+    modelMs: 0,
+    toolMs: 0,
+    modelCalls: 0,
+    toolCalls: 0,
+    failedTools: 0,
+    tokens: 0,
+    cost: 0,
+    cacheRead: 0,
+    topTools: [],
+    longestTool: null,
+  };
+  const toolCounts = new Map();
+  for (const node of segment.nodes) {
+    stats.tokens += Number(node.tokens || 0);
+    stats.cost += Number(node.cost || 0);
+    stats.cacheRead += Number(node.cacheRead || 0);
+    if (node.type === 'llm') {
+      stats.modelCalls += 1;
+      stats.modelMs += Number(node.duration || 0);
+    }
+    if (isToolTraceNode(node)) {
+      stats.toolCalls += 1;
+      stats.toolMs += Number(node.duration || 0);
+      if (isFailedTraceNode(node)) stats.failedTools += 1;
+      const name = node.name || 'tool';
+      const prev = toolCounts.get(name) || { name, count: 0, durationMs: 0 };
+      prev.count += 1;
+      prev.durationMs += Number(node.duration || 0);
+      toolCounts.set(name, prev);
+      if (!stats.longestTool || Number(node.duration || 0) > stats.longestTool.durationMs) {
+        stats.longestTool = { name, durationMs: Number(node.duration || 0) };
+      }
+    }
+  }
+  stats.topTools = Array.from(toolCounts.values())
+    .sort((a, b) => b.durationMs - a.durationMs || b.count - a.count || a.name.localeCompare(b.name))
+    .slice(0, 3);
+  return stats;
+}
+
+function buildPromptSegments(rows, nodes, totalMs) {
+  const userIndexes = rows
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.turn.role === 'user' && row.turn.kind !== 'tool');
+  if (!userIndexes.length) {
+    const segment = {
+      id: 'prompt-0',
+      index: 1,
+      total: 1,
+      userRow: rows[0] || null,
+      startMs: 0,
+      endMs: totalMs,
+      rows,
+      nodes: (nodes || []).filter(n => !isRootTraceNode(n)),
+    };
+    segment.stats = summarizePromptSegment(segment);
+    segment.severity = durationSeverity(segment.stats.wallMs, segment.stats.wallMs);
+    return [segment];
+  }
+  const nodeEnds = (nodes || [])
+    .filter(n => !isRootTraceNode(n))
+    .map(n => Number(n.start || 0) + Number(n.duration || 0));
+  const maxEnd = Math.max(totalMs, ...nodeEnds, 1000);
+  const segments = userIndexes.map(({ row, index }, i) => {
+    const next = userIndexes[i + 1];
+    const startMs = Math.max(0, Number(row.start || 0));
+    const endMs = Math.max(startMs + 1, next ? Number(next.row.start || startMs + 1) : maxEnd);
+    const segment = {
+      id: `prompt-${i}`,
+      index: i + 1,
+      total: userIndexes.length,
+      userRow: row,
+      startMs,
+      endMs,
+      rows: rows.slice(index, next ? next.index : rows.length),
+      nodes: (nodes || []).filter(n => !isRootTraceNode(n) && Number(n.start || 0) >= startMs && Number(n.start || 0) < endMs),
+    };
+    segment.stats = summarizePromptSegment(segment);
+    return segment;
+  });
+  const maxWall = Math.max(...segments.map(s => s.stats.wallMs), 1);
+  segments.forEach(segment => {
+    segment.severity = durationSeverity(segment.stats.wallMs, maxWall);
+  });
+  return segments;
+}
+
 function traceSummaryValue(value, fallback = '—') {
   return value === undefined || value === null || value === '' ? fallback : value;
 }
@@ -1283,9 +1396,108 @@ function TracePerformanceStrip({ session }) {
   );
 }
 
+function TraceDurationRail({ segments, totalMs, onJump }) {
+  if (!segments.length) return null;
+  return (
+    <div className="trace-duration-rail" aria-label="time by user input">
+      {segments.map(segment => {
+        const left = Math.max(0, Math.min(99, (segment.startMs / totalMs) * 100));
+        const width = Math.max(0.45, Math.min(100 - left, ((segment.endMs - segment.startMs) / totalMs) * 100));
+        return (
+          <button
+            key={segment.id}
+            className={`trace-duration-segment severity-${segment.severity}`}
+            style={{ left: `${left}%`, width: `${width}%` }}
+            title={`user input ${segment.index}: ${traceSeconds(segment.stats.wallMs)} · $${segment.stats.cost.toFixed(4)} · ${window.formatNum(segment.stats.tokens)} tok`}
+            onClick={() => onJump(segment.id)}
+          >
+            <span>{segment.index}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function CombinedTraceRow({ row, showTimeline, totalMs, markers, maxNodeDuration }) {
+  const isUser = row.turn.role === 'user' && row.turn.kind !== 'tool';
+  const left = Math.max(0, Math.min(99.4, (row.start / totalMs) * 100));
+  const width = Math.max(0.4, Math.min(100 - left, (row.duration / totalMs) * 100));
+  const severity = durationSeverityClass(row.node?.duration || row.duration, maxNodeDuration);
+  return (
+    <div className={`combined-trace-row ${isUser ? 'user-row' : ''}`}>
+      <div className="combined-trace-card">
+        <TranscriptBlock turn={row.turn} />
+        {row.node && (
+          <div className={`combined-row-metrics ${severity} ${row.node.status && row.node.status !== 'completed' ? 'warn' : ''}`}>
+            <span>{traceSeconds(row.node.duration)}</span>
+            {row.node.tokens > 0 && <span>{window.formatNum(row.node.tokens)} tok</span>}
+            {row.node.cost > 0 && <span>${row.node.cost.toFixed(row.node.cost >= 1 ? 2 : 4)}</span>}
+            {row.node.cacheRead > 0 && <span>{window.formatNum(row.node.cacheRead)} cache</span>}
+            {row.node.status && row.node.status !== 'completed' && <span>{row.node.status}</span>}
+          </div>
+        )}
+      </div>
+      {showTimeline && (
+        <div className="combined-row-timeline">
+          {markers.map(p => <span key={p} className="ls-run-tick" style={{ left: `${p * 100}%` }} />)}
+          <span className="combined-row-time">{row.label}</span>
+          <span
+            className={`combined-row-bar ${severity}`}
+            style={{ left: `${left}%`, width: `${width}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PromptSegmentBlock({ segment, open, onToggle, markerRef, showTimeline, totalMs, markers, maxNodeDuration }) {
+  const stats = segment.stats;
+  const userText = segment.userRow?.turn?.text || 'session start';
+  const topTools = stats.topTools.map(t => `${t.name} ${t.count}x`).join(' · ');
+  return (
+    <section ref={markerRef} className={`prompt-segment severity-${segment.severity}`}>
+      <button className="prompt-segment-head" onClick={onToggle}>
+        <span className="prompt-segment-kicker">
+          <window.Icon.Sessions size={12} /> user input {segment.index}/{segment.total}
+        </span>
+        <strong title={userText}>{singleLineText(userText, 118)}</strong>
+        <span className="prompt-segment-stats">
+          <em>{traceSeconds(stats.wallMs)}</em>
+          <em>${stats.cost.toFixed(stats.cost >= 1 ? 2 : 4)}</em>
+          <em>{window.formatNum(stats.tokens)} tok</em>
+          <em>{stats.toolCalls} tools</em>
+          {stats.failedTools > 0 && <em className="danger">{stats.failedTools} failed</em>}
+        </span>
+        <span className="prompt-segment-toggle">{open ? 'hide' : 'show'}</span>
+      </button>
+      <div className="prompt-segment-subline">
+        <span>{stats.modelCalls} model calls</span>
+        <span>{traceSeconds(stats.toolMs)} tool time</span>
+        {stats.longestTool && <span>slowest {stats.longestTool.name} · {traceSeconds(stats.longestTool.durationMs)}</span>}
+        {topTools && <span>{topTools}</span>}
+      </div>
+      {open && (
+        <div className="prompt-segment-body">
+          {segment.rows.map(row => (
+            <CombinedTraceRow
+              key={row.id}
+              row={row}
+              showTimeline={showTimeline}
+              totalMs={totalMs}
+              markers={markers}
+              maxNodeDuration={maxNodeDuration}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function CombinedTraceView({ session, trace, onCopyDialogue, copiedDialogue }) {
   const [showTimeline, setShowTimeline] = useStateSD(() => window.localStorage?.getItem('tracebook.trace.showTimeline') === '1');
-  const [activeUserId, setActiveUserId] = useStateSD(null);
   const runListRef = React.useRef(null);
   const markerRefs = React.useRef({});
   const [showStickyUser, setShowStickyUser] = useStateSD(false);
@@ -1300,30 +1512,70 @@ function CombinedTraceView({ session, trace, onCopyDialogue, copiedDialogue }) {
   })();
   const totalMs = Math.max(trace.totalDuration || 0, fallbackTotal, 1000);
   const rows = turns.map((turn, index) => turnTimelineRow(turn, index, originMs, totalMs, nodes));
-  const userRows = rows.filter(row => row.turn.role === 'user' && row.turn.kind !== 'tool');
-  const activeUser = userRows.find(row => row.id === activeUserId) || userRows[0];
+  const maxNodeDuration = Math.max(1, ...nodes.filter(n => !isRootTraceNode(n)).map(n => Number(n.duration || 0)));
+  const segments = buildPromptSegments(rows, nodes, totalMs);
+  const [activeSegmentId, setActiveSegmentId] = useStateSD(null);
+  const [openSegments, setOpenSegments] = useStateSD(() => new Set(segments[0] ? [segments[0].id] : []));
+  const activeSegment = segments.find(segment => segment.id === activeSegmentId) || segments[0];
   const markers = totalMs > 10 * 60 * 1000 ? [0, .5, 1] : [0, .25, .5, .75, 1];
 
   React.useEffect(() => {
-    if (!activeUserId && userRows[0]) setActiveUserId(userRows[0].id);
-  }, [rows.length]);
+    markerRefs.current = {};
+    setActiveSegmentId(segments[0]?.id || null);
+    setOpenSegments(new Set(segments[0] ? [segments[0].id] : []));
+  }, [session.id, rows.length]);
 
-  const updateActiveUserFromScroll = () => {
+  React.useEffect(() => {
+    if (!activeSegmentId && segments[0]) setActiveSegmentId(segments[0].id);
+  }, [segments.length]);
+
+  React.useEffect(() => {
+    setOpenSegments(prev => {
+      if (prev.size || !segments[0]) return prev;
+      return new Set([segments[0].id]);
+    });
+  }, [segments.length]);
+
+  const updateActiveSegmentFromScroll = () => {
     const list = runListRef.current;
-    if (!list || !userRows.length) return;
+    if (!list || !segments.length) return;
     setShowStickyUser(list.scrollTop > 12);
     const top = list.getBoundingClientRect().top + 8;
-    let current = userRows[0];
-    for (const row of userRows) {
-      const marker = markerRefs.current[row.id];
-      if (marker && marker.getBoundingClientRect().top <= top) current = row;
+    let current = segments[0];
+    for (const segment of segments) {
+      const marker = markerRefs.current[segment.id];
+      if (marker && marker.getBoundingClientRect().top <= top) current = segment;
     }
-    setActiveUserId(current.id);
+    setActiveSegmentId(current.id);
   };
 
-  const scrollToActiveUser = () => {
-    if (!activeUser) return;
-    markerRefs.current[activeUser.id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const scrollToActiveSegment = () => {
+    if (!activeSegment) return;
+    markerRefs.current[activeSegment.id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const jumpToSegment = (id) => {
+    setActiveSegmentId(id);
+    setOpenSegments(prev => new Set([...prev, id]));
+    requestAnimationFrame(() => {
+      markerRefs.current[id]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const toggleSegment = (id) => {
+    setOpenSegments(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllSegments = () => {
+    setOpenSegments(prev => {
+      if (segments.length && prev.size === segments.length) return new Set();
+      return new Set(segments.map(segment => segment.id));
+    });
   };
 
   const toggleTimeline = () => {
@@ -1345,6 +1597,9 @@ function CombinedTraceView({ session, trace, onCopyDialogue, copiedDialogue }) {
           <button className="ls-icon-button" title="copy dialogue" onClick={onCopyDialogue}>
             <window.Icon.Copy size={14} />
           </button>
+          <button className="ls-tool-button muted" onClick={toggleAllSegments}>
+            {segments.length > 0 && openSegments.size === segments.length ? 'Collapse' : 'Expand'}
+          </button>
           <button className="ls-tool-button muted" onClick={() => { runListRef.current?.scrollTo({ top: 0, behavior: 'smooth' }); }}>
             Reset
           </button>
@@ -1352,11 +1607,12 @@ function CombinedTraceView({ session, trace, onCopyDialogue, copiedDialogue }) {
       </div>
 
       <TracePerformanceStrip session={session} />
+      <TraceDurationRail segments={segments} totalMs={totalMs} onJump={jumpToSegment} />
 
-      {activeUser && showStickyUser && (
-        <button className="ls-trace-user-input" onClick={scrollToActiveUser}>
-          <span><window.Icon.Sessions size={12} /> user input {userRows.length > 1 ? `${userRows.indexOf(activeUser) + 1}/${userRows.length}` : ''}</span>
-          <strong>{activeUser.turn.text}</strong>
+      {activeSegment && showStickyUser && (
+        <button className="ls-trace-user-input" onClick={scrollToActiveSegment}>
+          <span><window.Icon.Sessions size={12} /> user input {activeSegment.index}/{segments.length}</span>
+          <strong>{activeSegment.userRow?.turn?.text || 'session start'}</strong>
         </button>
       )}
 
@@ -1373,48 +1629,20 @@ function CombinedTraceView({ session, trace, onCopyDialogue, copiedDialogue }) {
         </div>
       )}
 
-      <div className="ls-run-list combined-trace-list" ref={runListRef} onScroll={updateActiveUserFromScroll}>
-        {rows.length ? rows.map(row => {
-          const isUser = row.turn.role === 'user' && row.turn.kind !== 'tool';
-          const left = Math.max(0, Math.min(99.4, (row.start / totalMs) * 100));
-          const width = Math.max(0.4, Math.min(100 - left, (row.duration / totalMs) * 100));
-          const meta = row.node ? (NODE_META[row.node.type] || NODE_META.tool) : (isUser ? NODE_META.tool : NODE_META.assistant);
-          return (
-            <div
-              key={row.id}
-              ref={el => { if (isUser && el) markerRefs.current[row.id] = el; }}
-              className={`combined-trace-row ${isUser ? 'user-row' : ''}`}
-            >
-              <div className="combined-trace-card">
-                <TranscriptBlock turn={row.turn} />
-                {row.node && (
-                  <div className={`combined-row-metrics ${row.node.status && row.node.status !== 'completed' ? 'warn' : ''}`}>
-                    <span>{traceSeconds(row.node.duration)}</span>
-                    {row.node.tokens > 0 && <span>{window.formatNum(row.node.tokens)} tok</span>}
-                    {row.node.cost > 0 && <span>${row.node.cost.toFixed(row.node.cost >= 1 ? 2 : 4)}</span>}
-                    {row.node.cacheRead > 0 && <span>{window.formatNum(row.node.cacheRead)} cache</span>}
-                    {row.node.status && row.node.status !== 'completed' && <span>{row.node.status}</span>}
-                  </div>
-                )}
-              </div>
-              {showTimeline && (
-                <div className="combined-row-timeline">
-                  {markers.map(p => <span key={p} className="ls-run-tick" style={{ left: `${p * 100}%` }} />)}
-                  <span className="combined-row-time">{row.label}</span>
-                  <span
-                    className="combined-row-bar"
-                    style={{
-                      left: `${left}%`,
-                      width: `${width}%`,
-                      background: meta.bar || meta.bg,
-                      borderLeftColor: meta.color,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        }) : (
+      <div className="ls-run-list combined-trace-list" ref={runListRef} onScroll={updateActiveSegmentFromScroll}>
+        {segments.length ? segments.map(segment => (
+          <PromptSegmentBlock
+            key={segment.id}
+            segment={segment}
+            open={openSegments.has(segment.id)}
+            onToggle={() => toggleSegment(segment.id)}
+            markerRef={el => { if (el) markerRefs.current[segment.id] = el; }}
+            showTimeline={showTimeline}
+            totalMs={totalMs}
+            markers={markers}
+            maxNodeDuration={maxNodeDuration}
+          />
+        )) : (
           <div className="ls-empty-trace">no transcript messages found</div>
         )}
         {session.live && (
@@ -1669,7 +1897,17 @@ function TraceSummary({ session }) {
 
 // ─── SessionDetailScreen ─────────────────────────────────────────────────────
 
-function SessionDetailScreen({ id }) {
+function SessionDetailNav({ session, view }) {
+  const base = `#/sessions/${session.id}`;
+  return (
+    <nav className="session-detail-nav" aria-label="session detail views">
+      <a className={view === 'trace' ? 'active' : ''} href={base}>trace</a>
+      <a className={view === 'context' ? 'active' : ''} href={`${base}/context`}>context</a>
+    </nav>
+  );
+}
+
+function SessionDetailScreen({ id, view = 'trace' }) {
   // Re-render counter — incremented whenever tracebook:session-ready fires for this id
   const [rev, setRev] = useStateSD(0);
   const [loading, setLoading] = useStateSD(false);
@@ -1725,14 +1963,8 @@ function SessionDetailScreen({ id }) {
     }
   }, [id]);
   const trace = detailObj?.trace || { totalDuration: 0, totalTokens: 0, totalCost: 0, nodes: [] };
-  const nodeDetail = window.NODE_DETAIL || {};
-  const firstNode = (trace.nodes && trace.nodes.length > 1)
-    ? trace.nodes[1].id : (trace.nodes && trace.nodes[0] ? trace.nodes[0].id : null);
-  const [selected, setSelected] = useStateSD(firstNode);
   const [copied, setCopied] = useStateSD(false);
   const [copiedDialogue, setCopiedDialogue] = useStateSD(false);
-  // Reset selected node when data reloads
-  React.useEffect(() => { if (firstNode) setSelected(firstNode); }, [firstNode, rev]);
 
   if (!session && loading) return <EmptyState glyph="..." title="loading session" body={`reading ${id} from disk.`} />;
   if (!session) return <EmptyState glyph="∅" title="session not found" body={loadError || `no session matches "${id}".`} path={`transcripts/${id}.jsonl`} />;
@@ -1779,12 +2011,18 @@ function SessionDetailScreen({ id }) {
         </>}
       />
 
-      <CombinedTraceView
-        session={session}
-        trace={trace}
-        onCopyDialogue={copyDialogue}
-        copiedDialogue={copiedDialogue}
-      />
+      <SessionDetailNav session={session} view={view} />
+
+      {view === 'context' ? (
+        <ContextPanel session={session} />
+      ) : (
+        <CombinedTraceView
+          session={session}
+          trace={trace}
+          onCopyDialogue={copyDialogue}
+          copiedDialogue={copiedDialogue}
+        />
+      )}
     </div>
   );
 }

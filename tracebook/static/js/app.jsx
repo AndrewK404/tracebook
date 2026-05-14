@@ -21,8 +21,10 @@ function App() {
     screen = <SessionsScreen />;
     crumb = [{ label: 'sessions' }];
   } else if (route.startsWith('/sessions/')) {
-    const id = route.split('/')[2];
-    screen = <SessionDetailScreen id={id} />;
+    const parts = route.split('/').filter(Boolean);
+    const id = parts[1];
+    const view = parts[2] === 'context' ? 'context' : 'trace';
+    screen = <SessionDetailScreen id={id} view={view} />;
     const sess = window.SESSIONS.find(s => s.id === id || s.short === id);
     crumb = [{ label: 'sessions', href: '/sessions' }, { label: sess ? sess.short : id }];
   } else if (route === '/settings') {

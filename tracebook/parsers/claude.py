@@ -825,7 +825,7 @@ def _build_trace(events: list[dict], dominant_model: str) -> list[TraceNode]:
             result_ts = result.get("ts") if result else None
             duration = 150
             if ev_ts and result_ts:
-                duration = max(50, min(30_000, int((result_ts - ev_ts).total_seconds() * 1000) - llm_dur))
+                duration = max(50, int((result_ts - ev_ts).total_seconds() * 1000) - llm_dur)
             status = "completed" if result else "pending"
             node_type = "mcp" if tool_name.startswith("mcp__") else "tool"
             if tool_name in {"Skill", "SkillRunner"}:

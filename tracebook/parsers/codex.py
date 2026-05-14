@@ -600,7 +600,7 @@ def _build_trace(events: list[dict[str, Any]], model: str) -> list[TraceNode]:
             result_ts = _ts(result.get("timestamp")) if result else None
             duration = 150
             if ev_ts and result_ts:
-                duration = max(150, min(30_000, int((result_ts - ev_ts).total_seconds() * 1000)))
+                duration = max(150, int((result_ts - ev_ts).total_seconds() * 1000))
             node_id = f"t{idx}"
             node_type = "mcp" if name.startswith("mcp__") else "tool"
             if name in {"Skill", "SkillRunner"}:
