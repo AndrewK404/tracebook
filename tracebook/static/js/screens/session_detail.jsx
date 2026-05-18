@@ -111,13 +111,9 @@ function SessionReadableShell({ kind, segments, activeId, onJump, children }) {
   );
 }
 
-function ContextPanel({ session, trace }) {
+function ContextPanel({ session }) {
   const ctx = window.CONTEXT_BUDGET || {};
   const items = window.CONTEXT_ITEMS || {};
-  const detail = sessionDetailForView(session);
-  const contextTrace = sessionTraceForView(session, trace);
-  const segments = userInputSegmentsForDetail(detail, contextTrace);
-  const [activeSegmentId, setActiveSegmentId] = useStateSD(segments[0]?.id || null);
   const contextUsed = Number(ctx.contextUsed || 0);
   const contextMax = Math.max(Number(ctx.contextMax || 0), contextUsed, 1);
   const compressions = items.compressions ?? session?.compressions ?? 0;
@@ -128,19 +124,8 @@ function ContextPanel({ session, trace }) {
     : (ctx.categories || []);
   const systemTools = items.systemTools || [];
 
-  React.useEffect(() => {
-    setActiveSegmentId(segments[0]?.id || null);
-  }, [session?.id, segments.length]);
-
-  const jumpToTranscriptSegment = (id) => {
-    setActiveSegmentId(id);
-    if (!id || !session?.id) return;
-    window.sessionStorage?.setItem('tracebook.transcriptJump', JSON.stringify({ sessionId: session.id, segmentId: id }));
-    window.location.hash = `#/sessions/${session.id}/transcript`;
-  };
-
   return (
-    <SessionReadableShell kind="context" segments={segments} activeId={activeSegmentId} onJump={jumpToTranscriptSegment}>
+    <div className="session-context-readable">
       <div className="context-dashboard">
         <div className="context-top-grid">
           <div className="context-left-stack">
@@ -200,7 +185,7 @@ function ContextPanel({ session, trace }) {
           </section>
         </div>
       </div>
-    </SessionReadableShell>
+    </div>
   );
 }
 
@@ -3734,7 +3719,7 @@ function SessionDetailScreen({ id, view = 'trace' }) {
       <SessionDetailNav session={session} view={view} />
 
       {view === 'context' ? (
-        <ContextPanel session={session} trace={trace} />
+        <ContextPanel session={session} />
       ) : view === 'transcript' ? (
         <TranscriptPanel session={session} trace={trace} />
       ) : (

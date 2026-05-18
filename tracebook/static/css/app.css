@@ -892,6 +892,11 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  .session-context-readable {
+    width: min(100%, 1180px);
+    margin: 0 auto;
+    min-width: 0;
+  }
   .session-readable-shell {
     --trace-rail-accent: #2dd4bf;
     --trace-rail-glow: rgba(45,212,191,0.22);
@@ -902,9 +907,6 @@
     gap: 10px;
     align-items: start;
     min-width: 0;
-  }
-  .session-readable-shell.context {
-    --session-readable-max: 1180px;
   }
   .session-readable-shell.transcript {
     --session-readable-max: 1120px;
