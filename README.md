@@ -26,10 +26,8 @@ watching ~/.claude/projects · 684 sessions indexed
 Tracebook is a **read-only observer**. It never calls any model API, never
 proxies tokens, and never writes inside `~/.claude/`.
 
-This is **v0.1** of a longer roadmap that eventually grows into
-[Leibniz](https://github.com/AndrewK404/leibniz-platform): MCP memory server,
-workflow orchestration, approval inbox. v0.1 does one thing well: turn raw
-JSONL into a useful dashboard.
+This is the first stage of my project for automation through agent teams. I
+will keep updating it and gradually move it toward a full platform.
 
 ## Install
 
