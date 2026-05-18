@@ -9,21 +9,6 @@ tracebook · http://127.0.0.1:4178
 watching ~/.claude/projects · 684 sessions indexed
 ```
 
-## Why this is fast (from start)
-
-Most delay previously came from reparsing large JSONL files on every request.
-Tracebook now works on an index-first model: list endpoints usually return
-from cache, and heavy parsing is only done when data actually changes.
-
-| Metric | Before | Now | Why it helps |
-|---|---:|---:|---|
-| Session list refresh | scans all files each request | incremental dirty-path updates + cached mtimes | usually near-zero work between changes |
-| Session detail response | reparses trace/transcript on each open | cached by file `mtime_ns` | same session opens instantly |
-| Hook lookup in detail view | full `hooks.jsonl` scan per request | cached indices by session/path | constant-time lookup for tool inputs |
-| Refresh frequency | periodic full parse | lazy full resync (~60s) + fast incremental refresh | fewer parser runs, same safety on deletions |
-
-The result is a dashboard that stays responsive even with hundreds of sessions.
-
 ## What it does
 
 - **Discovers** sessions from `~/.claude/projects/**/*.jsonl`.
