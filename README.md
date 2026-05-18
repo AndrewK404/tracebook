@@ -49,9 +49,10 @@ Open <http://127.0.0.1:4178>.
 ## Optional Hook Capture
 
 Tracebook can also receive Claude Code or Codex hook payloads through the
-`tracebook-hook` script. The hook writes a sanitized event stream to
-`~/.tracebook/hooks.jsonl`; it keeps tool names, commands, file paths, prompts,
-and short output previews while clipping large content and images.
+`tracebook-hook` script. The hook writes events to
+`~/.tracebook/hooks.jsonl`. Tool hook payloads are sanitized; model-request
+hook payloads are preserved under `model_input` so Tracebook can show the exact
+request sent to the model instead of the reconstructed log replay.
 
 Use it from `PreToolUse`, `PostToolUse`, `PostToolBatch`, `SessionStart`, or
 `UserPromptSubmit` hooks:
@@ -62,6 +63,11 @@ Use it from `PreToolUse`, `PostToolUse`, `PostToolBatch`, `SessionStart`, or
   "command": "uv run --project /path/to/tracebook tracebook-hook"
 }
 ```
+
+If your runner exposes a pre-model hook, pass one of `model_input`,
+`model_request`, `request_body`, `request`, `body`, or `messages` in the hook
+JSON. Without that hook Tracebook still reconstructs model input by walking the
+transcript up to the selected model span.
 
 ## Stack
 

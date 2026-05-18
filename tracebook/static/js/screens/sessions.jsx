@@ -56,6 +56,36 @@ function sessionTokensLabel(s) {
   return window.formatNum ? window.formatNum(total) : total.toLocaleString();
 }
 
+function sessionDurationSeconds(s) {
+  const start = s?.startedAt ? Date.parse(s.startedAt) : NaN;
+  const last = s?.lastAt ? Date.parse(s.lastAt) : NaN;
+  const end = s?.live ? Date.now() : last;
+  if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
+    return Math.max(0, (end - start) / 1000);
+  }
+
+  let seconds = 0;
+  String(s?.duration || '').replace(/(\d+)\s*([dhms])/g, (_, n, unit) => {
+    const value = Number(n) || 0;
+    seconds += unit === 'd' ? value * 86400
+      : unit === 'h' ? value * 3600
+      : unit === 'm' ? value * 60
+      : value;
+    return '';
+  });
+  return seconds;
+}
+
+function topMetricThreshold(rows, valueFor) {
+  const values = (rows || [])
+    .map(valueFor)
+    .filter(value => Number.isFinite(value) && value > 0)
+    .sort((a, b) => b - a);
+  if (!values.length) return Infinity;
+  const topCount = Math.max(1, Math.ceil(values.length * 0.1));
+  return values[Math.min(topCount - 1, values.length - 1)];
+}
+
 function compactSessionColumns(showModel, showBranch) {
   return `122px minmax(220px, 1fr) ${showBranch ? '170px' : '135px'} ${showModel ? '106px' : ''} 58px 82px 88px 84px 72px`
     .replace(/\s+/g, ' ')
@@ -153,9 +183,12 @@ function groupByProject(rows) {
 
 // ─── shared row renderers ────────────────────────────────────────────────────
 
-function CompactRow({ s, density, showModel, showBranch }) {
+function CompactRow({ s, density, showModel, showBranch, topDurationThreshold = Infinity, topCostThreshold = Infinity }) {
   const py = density === 'tight' ? 'py-3' : density === 'cozy' ? 'py-4' : 'py-5';
   const cols = compactSessionColumns(showModel, showBranch);
+  const durationSeconds = sessionDurationSeconds(s);
+  const topDuration = durationSeconds > 0 && durationSeconds >= topDurationThreshold;
+  const topCost = Number(s.cost || 0) > 0 && Number(s.cost || 0) >= topCostThreshold;
   return (
     <li
       onClick={() => window.location.hash = `#/sessions/${s.id}`}
@@ -177,12 +210,66 @@ function CompactRow({ s, density, showModel, showBranch }) {
         </div>
       )}
       <div className="text-right font-mono num text-[12.5px]" style={{ color: 'var(--ink-3)' }}>{s.turns}</div>
-      <div className="text-right font-mono num text-[12.5px] session-duration-pill">{s.duration || '—'}</div>
+      <div
+        className={`text-right font-mono num text-[12.5px] session-duration-value ${topDuration ? 'session-metric-hot' : ''}`}
+        title={topDuration ? `Top 10% by duration; threshold ${formatDurationThreshold(topDurationThreshold)}.` : undefined}>
+        {s.duration || '—'}
+      </div>
       <div className="text-right font-mono num text-[12.5px] session-token-value">{sessionTokensLabel(s)}</div>
-      <div className="text-right font-mono num text-[12.5px] text-emerald-300">${s.cost.toFixed(2)}</div>
+      <div
+        className={`text-right font-mono num text-[12.5px] session-cost-value ${topCost ? 'session-metric-hot' : ''}`}
+        title={topCost ? `Top 10% by estimated cost; threshold $${topCostThreshold.toFixed(2)}.` : undefined}>
+        ${s.cost.toFixed(2)}
+      </div>
       <div className="text-right t-meta" style={{ color: 'var(--ink-4)' }}>{s.last}</div>
     </li>
   );
+}
+
+function SessionsCompactTable({ rows, density = 'cozy', showModel = true, showBranch = true, zebra = false, limit }) {
+  const visibleRows = limit ? rows.slice(0, limit) : rows;
+  const thresholdRows = window.SESSIONS || visibleRows;
+  const durationThreshold = topMetricThreshold(thresholdRows, sessionDurationSeconds);
+  const costThreshold = topMetricThreshold(thresholdRows, s => Number(s.cost) || 0);
+  return (
+    <div className="session-table-panel">
+      <div
+        className="session-table-head grid gap-x-4 px-4 py-3 t-eyebrow border-b"
+        style={{
+          borderColor: 'var(--line-0)',
+          gridTemplateColumns: compactSessionColumns(showModel, showBranch),
+        }}>
+        <span>session</span>
+        <span>preview</span>
+        <span>{showBranch ? 'project · branch' : 'project'}</span>
+        {showModel && <span>model</span>}
+        <span className="text-right">turns</span>
+        <span className="text-right">time</span>
+        <span className="text-right">tokens</span>
+        <span className="text-right">cost</span>
+        <span className="text-right">last</span>
+      </div>
+      <ul className={`session-table-body divide-y ${zebra ? 'sessions-zebra' : ''}`} style={{ borderColor: 'var(--line-0)' }}>
+        {visibleRows.map(s => (
+          <CompactRow key={s.id} s={s}
+            density={density}
+            showModel={showModel}
+            showBranch={showBranch}
+            topDurationThreshold={durationThreshold}
+            topCostThreshold={costThreshold} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+window.SessionsCompactTable = SessionsCompactTable;
+
+function formatDurationThreshold(seconds) {
+  if (!Number.isFinite(seconds)) return 'n/a';
+  const whole = Math.round(seconds);
+  if (whole < 60) return `${whole}s`;
+  if (whole < 3600) return `${Math.floor(whole / 60)}m`;
+  return `${Math.floor(whole / 3600)}h ${Math.floor((whole % 3600) / 60)}m`;
 }
 
 function CardRow({ s }) {
@@ -403,32 +490,13 @@ function SessionsScreen() {
 
       {/* — compact table — */}
       {t.sessionLayout === 'compact' && (
-        <div className="session-table-panel">
-          <div
-            className="session-table-head grid gap-x-4 px-4 py-3 t-eyebrow border-b"
-            style={{
-              borderColor: 'var(--line-0)',
-              gridTemplateColumns: compactSessionColumns(t.showModel, t.showBranch)
-            }}>
-            <span>session</span>
-            <span>preview</span>
-            <span>{t.showBranch ? 'project · branch' : 'project'}</span>
-            {t.showModel && <span>model</span>}
-            <span className="text-right">turns</span>
-            <span className="text-right">time</span>
-            <span className="text-right">tokens</span>
-            <span className="text-right">cost</span>
-            <span className="text-right">last</span>
-          </div>
-          <ul className={`session-table-body divide-y ${t.zebra ? 'sessions-zebra' : ''}`} style={{ borderColor: 'var(--line-0)' }}>
-            {rows.map(s => (
-              <CompactRow key={s.id} s={s}
-                density={t.rowDensity}
-                showModel={t.showModel}
-                showBranch={t.showBranch} />
-            ))}
-          </ul>
-        </div>
+        <SessionsCompactTable
+          rows={rows}
+          density={t.rowDensity}
+          showModel={t.showModel}
+          showBranch={t.showBranch}
+          zebra={t.zebra}
+        />
       )}
 
       {/* — cards grid — */}

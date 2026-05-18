@@ -23,7 +23,7 @@ function App() {
   } else if (route.startsWith('/sessions/')) {
     const parts = route.split('/').filter(Boolean);
     const id = parts[1];
-    const view = parts[2] === 'context' ? 'context' : 'trace';
+    const view = ['context', 'transcript'].includes(parts[2]) ? parts[2] : 'trace';
     screen = <SessionDetailScreen id={id} view={view} />;
     const sess = window.SESSIONS.find(s => s.id === id || s.short === id);
     crumb = [{ label: 'sessions', href: '/sessions' }, { label: sess ? sess.short : id }];
@@ -54,7 +54,7 @@ function App() {
   const mainWidthClass = wideScreen ? 'max-w-none' : 'max-w-[1280px]';
 
   return (
-    <>
+    <div className="app-shell">
       <Rail route={route} />
       <div className="flex-1 min-w-0 flex flex-col">
         <TopBar breadcrumb={crumb} right={topRight} />
@@ -63,7 +63,7 @@ function App() {
         </main>
         <ShellFooter />
       </div>
-    </>
+    </div>
   );
 }
 

@@ -48,8 +48,19 @@ const Icon = {
   Globe: makeIcon(<><circle cx="12" cy="12" r="9" /><line x1="3" y1="12" x2="21" y2="12" /><path d="M12 3a14.5 14.5 0 0 1 0 18 14.5 14.5 0 0 1 0-18z" /></>),
   Logo: ({ size = 22, className = '' }) => (
     <svg width={size} height={size} viewBox="0 0 24 24" className={className}>
-      <rect x="2" y="2" width="20" height="20" rx="5" fill="#34d399" />
-      <path d="M8 6 L8 18 L16 18" stroke="#08080a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <defs>
+        <linearGradient id="tracebook-logo-bg" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#0f172a" />
+          <stop offset="0.55" stopColor="#10251f" />
+          <stop offset="1" stopColor="#063f33" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="20" height="20" rx="6" fill="url(#tracebook-logo-bg)" />
+      <path d="M6.7 16.8C9.2 13.4 14.2 15.6 17.4 10.8" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+      <circle cx="6.7" cy="16.8" r="1.35" fill="#34d399" />
+      <circle cx="17.4" cy="10.8" r="1.35" fill="#67e8f9" />
+      <path d="M7.2 7.2H16.8M12 7.2V17" stroke="#ecfdf5" strokeWidth="2.35" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+      <rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="#34d399" strokeOpacity="0.28" fill="none" />
     </svg>
   ),
 };

@@ -1,4 +1,4 @@
-// Shell: rail + topbar + footer
+// Shell: top navigation + topbar + footer
 
 function Rail({ route }) {
   const isActive = (path) => route === path || (path === '/dashboard' && route === '/');
@@ -9,8 +9,8 @@ function Rail({ route }) {
   const uptime = about.uptime || '—';
 
   return (
-    <aside className="w-[232px] flex-shrink-0 flex flex-col border-r" style={{ borderColor: 'var(--line-0)', background: 'var(--bg-1)' }}>
-      <div className="px-5 py-5 flex items-center gap-2.5">
+    <header className="app-top-nav">
+      <div className="app-top-brand">
         <window.Icon.Logo size={22} />
         <div className="leading-tight">
           <div className="display-tight font-semibold text-[15px] text-zinc-100">tracebook</div>
@@ -18,43 +18,40 @@ function Rail({ route }) {
         </div>
       </div>
 
-      <div className="px-3 mt-1">
-        <div className="t-eyebrow px-3 mb-2" style={{ fontSize: '10px' }}>workspace</div>
-        <nav className="space-y-0.5">
-          <a href="#/dashboard" className={`rail-link ${isActive('/dashboard') ? 'active' : ''}`}>
-            <window.Icon.Dashboard size={15} />
-            <span className="flex-1">dashboard</span>
-          </a>
-          <a href="#/sessions" className={`rail-link ${sessionsActive ? 'active' : ''}`}>
-            <window.Icon.Sessions size={15} />
-            <span className="flex-1">sessions</span>
-            <span className="t-meta num text-[10.5px]" style={{ color: 'var(--ink-4)' }}>{window.SESSIONS.length}</span>
-          </a>
-          <a href="#/settings" className={`rail-link ${isActive('/settings') ? 'active' : ''}`}>
-            <window.Icon.Settings size={15} />
-            <span className="flex-1">settings</span>
-          </a>
-        </nav>
-      </div>
+      <nav className="app-top-links" aria-label="workspace">
+        <a href="#/dashboard" className={`rail-link ${isActive('/dashboard') ? 'active' : ''}`}>
+          <window.Icon.Dashboard size={15} />
+          <span>dashboard</span>
+        </a>
+        <a href="#/sessions" className={`rail-link ${sessionsActive ? 'active' : ''}`}>
+          <window.Icon.Sessions size={15} />
+          <span>sessions</span>
+          <span className="t-meta num text-[10.5px]" style={{ color: 'var(--ink-4)' }}>{window.SESSIONS.length}</span>
+        </a>
+        <a href="#/settings" className={`rail-link ${isActive('/settings') ? 'active' : ''}`}>
+          <window.Icon.Settings size={15} />
+          <span>settings</span>
+        </a>
+      </nav>
 
-      <div className="mt-auto px-5 py-4 space-y-3 border-t" style={{ borderColor: 'var(--line-0)' }}>
-        <div className="flex items-center justify-between t-meta">
+      <div className="app-top-status">
+        <div className="app-status-item">
           <span style={{ color: 'var(--ink-4)' }}>daemon</span>
           <span className="flex items-center gap-1.5 text-emerald-300">
             <StatusDot kind="emerald" pulse size={5} />
             {daemon}
           </span>
         </div>
-        <div className="flex items-center justify-between t-meta">
+        <div className="app-status-item">
           <span style={{ color: 'var(--ink-4)' }}>port</span>
           <span style={{ color: 'var(--ink-2)' }}>127.0.0.1:{port}</span>
         </div>
-        <div className="flex items-center justify-between t-meta">
+        <div className="app-status-item">
           <span style={{ color: 'var(--ink-4)' }}>uptime</span>
           <span style={{ color: 'var(--ink-2)' }}>{uptime}</span>
         </div>
       </div>
-    </aside>
+    </header>
   );
 }
 window.Rail = Rail;

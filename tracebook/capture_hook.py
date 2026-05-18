@@ -21,6 +21,14 @@ KEEP_INPUT_KEYS = {
     "workdir",
 }
 
+MODEL_INPUT_KEYS = {
+    "model_input",
+    "model_request",
+    "request_body",
+    "request",
+    "body",
+}
+
 
 def _clip(value: Any, limit: int = 2000) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
@@ -48,6 +56,43 @@ def _clip(value: Any, limit: int = 2000) -> Any:
                 out[str(key)] = _clip(val, limit=400)
         return out
     return _clip(str(value), limit=limit)
+
+
+def _jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    return str(value)
+
+
+def _extract_model_input(raw: dict[str, Any]) -> Any:
+    for key in MODEL_INPUT_KEYS:
+        if key in raw:
+            return raw.get(key)
+    payload = raw.get("payload")
+    if isinstance(payload, dict):
+        for key in MODEL_INPUT_KEYS:
+            if key in payload:
+                return payload.get(key)
+        if "messages" in payload:
+            return {
+                k: payload.get(k)
+                for k in ("model", "system", "developer", "instructions", "messages", "tools", "tool_choice", "metadata")
+                if k in payload
+            }
+    if "messages" in raw:
+        return {
+            k: raw.get(k)
+            for k in ("model", "system", "developer", "instructions", "messages", "tools", "tool_choice", "metadata")
+            if k in raw
+        }
+    event_name = str(raw.get("hook_event_name") or raw.get("event") or raw.get("type") or "").lower()
+    if ("model" in event_name or "llm" in event_name) and "input" in raw:
+        return raw.get("input")
+    return None
 
 
 def _provider(transcript_path: str) -> str:
@@ -82,6 +127,13 @@ def _record(raw: dict[str, Any]) -> dict[str, Any]:
         record["tool_response"] = _clip(raw.get("tool_response"))
     if "tool_calls" in raw:
         record["tool_calls"] = _clip(raw.get("tool_calls"))
+    model_input = _extract_model_input(raw)
+    if model_input is not None:
+        record["model_input"] = _jsonable(model_input)
+        record["model_input_source"] = "hook_exact"
+    for key in ("model", "request_id", "response_id"):
+        if key in raw:
+            record[key] = _clip(raw.get(key), 400)
     return {k: v for k, v in record.items() if v not in (None, "", [], {})}
 
 

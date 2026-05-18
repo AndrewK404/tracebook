@@ -12,6 +12,12 @@ from tracebook.parsers.codex import parse_session as parse_codex_session
 from tracebook.settings import settings
 
 
+def _transcript_scan_roots(kind: str, root: Path) -> list[Path]:
+    if kind == "codex" and root.name == ".codex":
+        return [root / "sessions", root / "archived_sessions"]
+    return [root]
+
+
 class Store:
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -31,33 +37,34 @@ class Store:
         """Walk configured transcript roots and parse all new/changed JSONL files."""
         parsers = {
             "claude": parse_claude_session,
-            "codex": parse_codex_session,
+            "codex": lambda path: parse_codex_session(path, include_trace=True),
         }
 
         seen_paths: set[Path] = set()
         with self._lock:
-            for kind, root in settings.transcript_roots:
-                if not root.exists():
-                    continue
+            for kind, configured_root in settings.transcript_roots:
                 parser = parsers[kind]
-                for jsonl in sorted(root.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
-                    if kind == "claude" and "subagents" in jsonl.parts:
+                for root in _transcript_scan_roots(kind, configured_root):
+                    if not root.exists():
                         continue
-                    seen_paths.add(jsonl)
-                    try:
-                        mtime = jsonl.stat().st_mtime
-                    except OSError:
-                        continue
-                    if self._mtimes.get(jsonl) == mtime:
-                        continue  # unchanged
-                    sess = parser(jsonl)
-                    if sess:
-                        previous_id = self._path_ids.get(jsonl)
-                        if previous_id and previous_id != sess.id:
-                            self._sessions.pop(previous_id, None)
-                        self._sessions[sess.id] = sess
-                        self._mtimes[jsonl] = mtime
-                        self._path_ids[jsonl] = sess.id
+                    for jsonl in sorted(root.rglob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True):
+                        if kind == "claude" and "subagents" in jsonl.parts:
+                            continue
+                        seen_paths.add(jsonl)
+                        try:
+                            mtime = jsonl.stat().st_mtime
+                        except OSError:
+                            continue
+                        if self._mtimes.get(jsonl) == mtime:
+                            continue  # unchanged
+                        sess = parser(jsonl)
+                        if sess:
+                            previous_id = self._path_ids.get(jsonl)
+                            if previous_id and previous_id != sess.id:
+                                self._sessions.pop(previous_id, None)
+                            self._sessions[sess.id] = sess
+                            self._mtimes[jsonl] = mtime
+                            self._path_ids[jsonl] = sess.id
 
             # remove sessions whose files are gone
             gone = set(self._mtimes) - seen_paths
