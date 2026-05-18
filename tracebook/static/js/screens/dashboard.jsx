@@ -90,6 +90,19 @@ function BarChart({ data, series, metric = 'tokens', showValues = false }) {
   const w = barW * 0.64;
 
   const cur = hover != null ? data[hover] : null;
+  const tooltipSeries = cur ? series.filter(s => valueFor(cur, s) > 0) : [];
+  const tooltipAnchor = hover == null ? P.l + 12 : x(hover) + w / 2;
+  const tooltipSide = tooltipAnchor < W * 0.55 ? 'right' : 'left';
+  const tooltipX = hover == null
+    ? P.l + 12
+    : tooltipSide === 'right'
+      ? x(hover) + w + 14
+      : x(hover) - 14;
+  const tooltipStyle = {
+    minWidth: 220,
+    left: `${(Math.max(P.l + 8, Math.min(W - P.r - 8, tooltipX)) / W) * 100}%`,
+    transform: tooltipSide === 'left' ? 'translateX(-100%)' : 'none',
+  };
 
   return (
     <div className="relative">
@@ -132,7 +145,9 @@ function BarChart({ data, series, metric = 'tokens', showValues = false }) {
                   fill="none" stroke="#34d399" strokeWidth="0.75" strokeDasharray="2 2" rx="2" opacity="0.5" />
               )}
               {showValues && totalFor(d) > 0 && i % valueLabelStep === 0 && (
-                <text x={x(i) + w/2} y={Math.max(10, y(totalFor(d)) - 5)} fill="#e4e4e7" fontSize="9" fontFamily="JetBrains Mono" textAnchor="middle">
+                <text x={x(i) + w/2} y={Math.max(13, y(totalFor(d)) - 7)}
+                  fill="#f4f4f5" stroke="#0b0b0d" strokeWidth="4" paintOrder="stroke" strokeLinejoin="round"
+                  fontSize="12" fontWeight="700" fontFamily="JetBrains Mono" textAnchor="middle">
                   {labelFor(totalFor(d))}
                 </text>
               )}
@@ -155,20 +170,22 @@ function BarChart({ data, series, metric = 'tokens', showValues = false }) {
       </div>
       {/* hover tooltip */}
       {cur && (
-        <div className="absolute top-3 left-12 surface-2 px-3 py-2.5 pointer-events-none" style={{ minWidth: 180 }}>
+        <div className="absolute top-3 surface-2 px-3 py-2.5 pointer-events-none" style={tooltipStyle}>
           <div className="t-eyebrow mb-1.5">{cur.today ? 'today' : cur.day}</div>
           <div className="display-tight font-semibold text-[18px] num leading-none mb-1" style={{ color: 'var(--ink-0)' }}>{labelFor(totalFor(cur), { digits: 2 })}</div>
           <div className="t-meta mb-2.5" style={{ fontSize: '10.5px' }}>
             {metric === 'cost' ? `${window.formatNum(cur.total, { digits: 2 })} output tokens` : `$${cur.cost.toFixed(2)} cost`} · {unitLabel}
           </div>
           <div className="space-y-1 text-[11px] font-mono">
-            {series.map(s => (
+            {tooltipSeries.length ? tooltipSeries.map(s => (
               <div key={s.key} className="flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-sm" style={{ background: s.color }} />
                 <span style={{ color: 'var(--ink-3)' }} className="flex-1">{s.label}</span>
                 <span className="num" style={{ color: 'var(--ink-1)' }}>{labelFor(valueFor(cur, s))}</span>
               </div>
-            ))}
+            )) : (
+              <div style={{ color: 'var(--ink-4)' }}>no model usage</div>
+            )}
           </div>
         </div>
       )}
@@ -414,10 +431,10 @@ function DashboardScreen() {
   const totalTokens = kpis ? fmtTokens(kpis.tokens.value) : '—';
   const totalCost   = kpis ? '$' + kpis.cost.value.toFixed(2) : '—';
   const sessions    = kpis ? kpis.sessions.value : 0;
-  const avgCost     = kpis ? '$' + kpis.avg_cost.value.toFixed(2) : '—';
   const periodLabel = period === 'all' ? 'all time' : `prev ${period}d`;
   // Concrete date ranges for the "vs prev" tooltip
   const periodDays  = period === 'all' ? 90 : Number(period);
+  const avgTokensPerDay = kpis ? window.formatNum(kpis.tokens.value / Math.max(1, periodDays)) : '—';
   const currentRange  = window.formatDateRange ? window.formatDateRange(0, periodDays) : '';
   const previousRange = window.formatDateRange ? window.formatDateRange(periodDays, periodDays) : '';
   const deltaTooltip  = `Comparing ${currentRange} (current) vs ${previousRange} (previous ${periodDays} days)`;
@@ -425,11 +442,10 @@ function DashboardScreen() {
   const chart = window.CHART_14D || [];
   const chartSeries = window.CHART_SERIES || [];
   const pie   = window.TOKENS_BY_PROJECT || [];
+  const recentSessions = (window.SESSIONS || []).slice(0, 5);
   const sparkLabels = sparkPointLabels(period, (window.SPARK_TOKENS || []).length || 12);
-  const avgSpark = (window.SPARK_COST || []).map((cost, i) => {
-    const count = (window.SPARK_SESSIONS || [])[i] || 0;
-    return count ? cost / count : 0;
-  });
+  const sparkBucketDays = Math.max(1 / 24, periodDays / Math.max(1, (window.SPARK_TOKENS || []).length || 12));
+  const avgTokensPerDaySpark = (window.SPARK_TOKENS || []).map(v => ((v || 0) * 1000) / sparkBucketDays);
 
   return (
     <div className="fade-up">
@@ -453,7 +469,7 @@ function DashboardScreen() {
         <KPIBlock label="output tokens" value={totalTokens} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_TOKENS} sparkColor="#7dd3fc" sparkLabels={sparkLabels} sparkValue={(v) => window.formatNum((v || 0) * 1000)} />
         <KPIBlock label="sessions" value={String(sessions)} delta={kpis ? kpis.sessions.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_SESSIONS} sparkColor="#a78bfa" sparkLabels={sparkLabels} sparkValue={(v) => `${Math.round(v || 0)}`} />
         <KPIBlock label="estimated cost" value={totalCost} delta={kpis ? kpis.cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={window.SPARK_COST} sparkLabels={sparkLabels} sparkValue={(v) => `$${(v || 0).toFixed(2)}`} accent />
-        <KPIBlock label="avg / session" value={avgCost} delta={kpis ? kpis.avg_cost.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={avgSpark} sparkColor="#fbbf24" sparkLabels={sparkLabels} sparkValue={(v) => `$${(v || 0).toFixed(2)}`} />
+        <KPIBlock label="avg tokens per day" value={avgTokensPerDay} delta={kpis ? kpis.tokens.delta : null} deltaLabel={`vs ${periodLabel}`} deltaTooltip={deltaTooltip} spark={avgTokensPerDaySpark} sparkColor="#fbbf24" sparkLabels={sparkLabels} sparkValue={(v) => window.formatNum(v || 0)} />
       </div>
 
       {/* Throughput bar chart */}
@@ -497,43 +513,17 @@ function DashboardScreen() {
       </div>
 
       {/* Recent sessions footer block */}
-      <Eyebrow num={4} label="recent activity" meta="last 24 hours" right={<a href="#/sessions" className="t-meta hover:text-zinc-100 flex items-center gap-1">all sessions <window.Icon.ArrowRight size={11} /></a>} />
-      <Card padding="p-0">
-        <table className="w-full text-[12.5px]">
-          <thead><tr className="t-eyebrow border-b" style={{ borderColor: 'var(--line-0)' }}>
-            <th className="text-left font-medium px-4 py-2.5 w-[120px]">session</th>
-            <th className="text-left font-medium px-4 py-2.5">preview</th>
-            <th className="text-left font-medium px-4 py-2.5">project</th>
-            <th className="text-right font-medium px-4 py-2.5">turns</th>
-            <th className="text-right font-medium px-4 py-2.5">cost</th>
-            <th className="text-right font-medium px-4 py-2.5 w-[80px]">last</th>
-          </tr></thead>
-          <tbody className="divide-y" style={{ borderColor: 'var(--line-0)' }}>
-            {(dash && dash.recent ? dash.recent : (window.SESSIONS || []).slice(0, 5)).map(s => (
-              <tr key={s.id} className="hover-row cursor-pointer" onClick={() => window.location.hash = `#/sessions/${s.id}`}>
-                <td className="px-4 py-3.5 font-mono">
-                  <div className="flex items-center gap-2">
-                    {s.live ? <StatusDot kind="emerald" pulse size={5} /> : <span className="w-[5px] h-[5px] rounded-full" style={{ background: 'var(--ink-4)' }} />}
-                    <button
-                      className="hover:text-zinc-50"
-                      style={{ color: 'var(--ink-2)' }}
-                      title={`copy ${s.resumeCommand || s.id}`}
-                      onClick={(e) => { e.stopPropagation(); window.copyText(s.resumeCommand || s.id); }}
-                    >
-                      {s.short}
-                    </button>
-                  </div>
-                </td>
-                <td className="px-4 py-3.5 truncate max-w-[320px]" style={{ color: 'var(--ink-1)' }}>{s.preview}</td>
-                <td className="px-4 py-3.5 t-meta" style={{ color: 'var(--ink-3)' }}>{s.project}</td>
-                <td className="px-4 py-3.5 text-right font-mono num" style={{ color: 'var(--ink-3)' }}>{s.turns}</td>
-                <td className="px-4 py-3.5 text-right font-mono num text-emerald-300">${s.cost.toFixed(2)}</td>
-                <td className="px-4 py-3.5 text-right t-meta" style={{ color: 'var(--ink-4)' }}>{s.last}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      <Eyebrow num={4} label="recent activity" meta="latest 5 sessions" right={<a href="#/sessions" className="t-meta hover:text-zinc-100 flex items-center gap-1">all sessions <window.Icon.ArrowRight size={11} /></a>} />
+      {window.SessionsCompactTable ? (
+        <window.SessionsCompactTable
+          rows={recentSessions}
+          density="cozy"
+          showModel={true}
+          showBranch={true}
+        />
+      ) : (
+        <div className="py-8 text-center t-small" style={{ color: 'var(--ink-4)' }}>sessions table unavailable</div>
+      )}
     </div>
   );
 }

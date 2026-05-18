@@ -1,10 +1,9 @@
 # tracebook
 
-Local dashboard for Claude Code (and other CLI agents) sessions. Parses the
-JSONL transcripts your agents write to disk and renders a calm, dark-themed
-dashboard with trace inspection and cost analytics.
+Local dashboard for Claude Code (and other CLI agents) sessions.  
+It reads agent session JSONL files and shows them in a fast, readable dashboard.
 
-```
+```bash
 $ uv run tracebook
 tracebook · http://127.0.0.1:4178
 watching ~/.claude/projects · 684 sessions indexed
@@ -12,26 +11,23 @@ watching ~/.claude/projects · 684 sessions indexed
 
 ## What it does
 
-- **Discovers** every Claude Code session in `~/.claude/projects/**/*.jsonl`.
-- **Parses** each transcript: user prompts, assistant turns, tool calls, usage
-  tokens, cost — without touching any API.
-- **Aggregates** tokens, cost, cache performance, and per-project breakdowns.
-- **Watches** the filesystem and re-indexes on every write.
-- **Renders** four screens in a beautiful dark dashboard:
-  - Dashboard — KPIs, throughput chart, cache ratio, project pie.
-  - Sessions — filterable list with compact / card / stacked / grouped layouts.
-  - Session detail — call tree, waterfall, context window breakdown, transcript.
-  - Settings — paths, hooks, MCP servers, pricing table.
+- **Discovers** sessions from `~/.claude/projects/**/*.jsonl`.
+- **Parses** user prompts, assistant turns, tool calls, token usage and cost.
+- **Aggregates** tokens, cost, cache stats, and per-project summaries.
+- **Watches** filesystem changes and updates session index.
+- **Renders**:
+  - Dashboard: KPI cards, charts, project pie.
+  - Sessions: searchable/filterable list.
+  - Session detail: tree/waterfall, context, transcript.
+  - Settings: paths, hooks, MCP servers, pricing.
 
 ## What it is not
 
 Tracebook is a **read-only observer**. It never calls any model API, never
 proxies tokens, and never writes inside `~/.claude/`.
 
-This is **v0.1** of a longer roadmap that eventually grows into
-[Leibniz](https://github.com/AndrewK404/leibniz-platform): MCP memory server,
-workflow orchestration, approval inbox. v0.1 does one thing well: turn raw
-JSONL into a useful dashboard.
+This is the first stage of my project for automation through agent teams. I
+will keep updating it and gradually move it toward a full platform.
 
 ## Install
 
@@ -49,9 +45,10 @@ Open <http://127.0.0.1:4178>.
 ## Optional Hook Capture
 
 Tracebook can also receive Claude Code or Codex hook payloads through the
-`tracebook-hook` script. The hook writes a sanitized event stream to
-`~/.tracebook/hooks.jsonl`; it keeps tool names, commands, file paths, prompts,
-and short output previews while clipping large content and images.
+`tracebook-hook` script. The hook writes events to
+`~/.tracebook/hooks.jsonl`. Tool hook payloads are sanitized; model-request
+hook payloads are preserved under `model_input` so Tracebook can show the exact
+request sent to the model instead of the reconstructed log replay.
 
 Use it from `PreToolUse`, `PostToolUse`, `PostToolBatch`, `SessionStart`, or
 `UserPromptSubmit` hooks:
@@ -62,6 +59,11 @@ Use it from `PreToolUse`, `PostToolUse`, `PostToolBatch`, `SessionStart`, or
   "command": "uv run --project /path/to/tracebook tracebook-hook"
 }
 ```
+
+If your runner exposes a pre-model hook, pass one of `model_input`,
+`model_request`, `request_body`, `request`, `body`, or `messages` in the hook
+JSON. Without that hook Tracebook still reconstructs model input by walking the
+transcript up to the selected model span.
 
 ## Stack
 
@@ -86,12 +88,38 @@ tracebook/
     ├── settings.py       paths, port
     ├── pricing.py        model cost table
     ├── watcher.py        watchdog observer
-    ├── parsers/claude.py Claude Code JSONL → typed Session
+    ├── parsers/
+    │   ├── claude.py    Claude Code JSONL → typed Session
     ├── templates/        Jinja2 shell template
     └── static/           CSS + JSX assets
 ```
 
+## Visual Tour
+
+### Dashboard
+
+![Dashboard overview](figures/dashboard.png)
+
+### Sessions
+
+![Sessions list](figures/sessions.png)
+
+### Session Trace
+
+![Session trace view](figures/sessions-trace.png)
+
+### Session Context
+
+![Session context view](figures/sessions-context.png)
+
+### Session Transcript
+
+![Session transcript view](figures/sessions-transcript.png)
+
+### Settings
+
+![Settings](figures/settings.png)
+
 ## License
 
 Apache 2.0.
-# ml-sandbox

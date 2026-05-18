@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tomllib
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -16,13 +17,16 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 
 from tracebook import __version__
-from tracebook.parsers.claude import Session, TraceNode
+from tracebook.parsers.claude import Session, TraceNode, parse_session as parse_claude_session
+from tracebook.parsers.codex import parse_session as parse_codex_session
 from tracebook.pricing import PRICING
 from tracebook.settings import settings
 from tracebook.store import store
 
 app = FastAPI(title="tracebook", version=__version__)
 APP_STARTED_AT = datetime.now(tz=timezone.utc)
+_SESSION_DETAIL_CACHE: dict[str, tuple[int, Session]] = {}
+_SESSION_DETAIL_CACHE_LOCK = threading.RLock()
 
 
 @app.middleware("http")
@@ -77,6 +81,22 @@ def _format_uptime(delta: timedelta) -> str:
 
 # ─── HTML shell ───────────────────────────────────────────────────────────────
 
+APP_ICON_SVG = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+<defs>
+<linearGradient id="tracebook-logo-bg" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+<stop stop-color="#0f172a"/>
+<stop offset="0.55" stop-color="#10251f"/>
+<stop offset="1" stop-color="#063f33"/>
+</linearGradient>
+</defs>
+<rect x="2" y="2" width="20" height="20" rx="6" fill="url(#tracebook-logo-bg)"/>
+<path d="M6.7 16.8C9.2 13.4 14.2 15.6 17.4 10.8" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+<circle cx="6.7" cy="16.8" r="1.35" fill="#34d399"/>
+<circle cx="17.4" cy="10.8" r="1.35" fill="#67e8f9"/>
+<path d="M7.2 7.2H16.8M12 7.2V17" stroke="#ecfdf5" stroke-width="2.35" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<rect x="2.5" y="2.5" width="19" height="19" rx="5.5" stroke="#34d399" stroke-opacity="0.28" fill="none"/>
+</svg>"""
+
 @app.get("/", response_class=HTMLResponse)
 async def index() -> HTMLResponse:
     tmpl = _jinja.get_template("index.html")
@@ -85,7 +105,12 @@ async def index() -> HTMLResponse:
 
 @app.get("/favicon.ico")
 async def favicon() -> Response:
-    return Response(status_code=204)
+    return Response(APP_ICON_SVG, media_type="image/svg+xml")
+
+
+@app.get("/favicon.svg")
+async def favicon_svg() -> Response:
+    return Response(APP_ICON_SVG, media_type="image/svg+xml")
 
 
 # ─── JSON API ─────────────────────────────────────────────────────────────────
@@ -102,13 +127,52 @@ async def api_sessions() -> JSONResponse:
     return JSONResponse([_session_summary(s) for s in sessions])
 
 
+def _load_detailed_session(sess: Session) -> Session:
+    cache_key = str(sess.path)
+    try:
+        mtime = sess.path.stat().st_mtime_ns
+    except OSError:
+        return sess
+
+    with _SESSION_DETAIL_CACHE_LOCK:
+        cached = _SESSION_DETAIL_CACHE.get(cache_key)
+        if cached and cached[0] == mtime and cached[1].id == sess.id:
+            return cached[1]
+
+    if sess.provider == "openai":
+        detailed = parse_codex_session(
+            sess.path,
+            include_trace=True,
+            include_transcript=True,
+            embed_subagents=True,
+        )
+    else:
+        detailed = parse_claude_session(
+            sess.path,
+            include_trace=True,
+            include_transcript=True,
+        )
+
+    if detailed is None:
+        detailed = sess
+    elif detailed.id != sess.id:
+        # Keep summary identity if the source path changed under the hood.
+        detailed = sess
+
+    with _SESSION_DETAIL_CACHE_LOCK:
+        if detailed is not sess:
+            _SESSION_DETAIL_CACHE[cache_key] = (mtime, detailed)
+
+    return detailed
+
+
 @app.get("/api/sessions/{session_id}")
 async def api_session_detail(session_id: str) -> JSONResponse:
     store.refresh()
     sess = store.get_session(session_id)
     if not sess:
         raise HTTPException(404, f"session {session_id!r} not found")
-    return JSONResponse(_session_detail(sess))
+    return JSONResponse(_session_detail(_load_detailed_session(sess)))
 
 
 @app.get("/api/dashboard")
@@ -291,6 +355,7 @@ def _session_summary(s: Session) -> dict:
         "turns": s.turns,
         "cost": round(s.cost, 4),
         "duration": s.duration_str,
+        "activeDurationMs": _session_active_duration_ms(s),
         "started": _relative_time(s.started_at, now),
         "last": "now" if live else _relative_time(s.last_at, now),
         "startedAt": s.started_at.isoformat() if s.started_at else None,
@@ -315,6 +380,8 @@ def _session_summary(s: Session) -> dict:
 
 
 def _session_detail(s: Session) -> dict:
+    trace_nodes = [_node_dict(n) for n in s.trace_nodes]
+    _attach_hook_model_inputs(s, trace_nodes)
     summary = _session_summary(s)
     summary["trace"] = {
         "originAt": s.started_at.isoformat() if s.started_at else None,
@@ -322,7 +389,7 @@ def _session_detail(s: Session) -> dict:
         "totalTokens": s.trace_nodes[0].tokens if s.trace_nodes else 0,
         "totalCacheRead": s.trace_nodes[0].cache_read if s.trace_nodes else 0,
         "totalCost": round(s.trace_nodes[0].cost if s.trace_nodes else 0, 4),
-        "nodes": [_node_dict(n) for n in s.trace_nodes],
+        "nodes": trace_nodes,
     }
     summary["traceSummary"] = _trace_summary(s)
     summary["transcript"] = s.transcript
@@ -339,6 +406,167 @@ def _session_detail(s: Session) -> dict:
         "compressions": s.compressions,
     }
     return summary
+
+
+def _hook_matches_session(record: dict[str, Any], s: Session) -> bool:
+    sid = str(record.get("session_id") or "")
+    if sid and (sid == s.id or sid == s.short or s.id.startswith(sid) or sid.startswith(s.short)):
+        return True
+    transcript_path = str(record.get("transcript_path") or "")
+    if transcript_path:
+        try:
+            if Path(transcript_path).expanduser().resolve() == s.path.resolve():
+                return True
+        except OSError:
+            if transcript_path == str(s.path):
+                return True
+    return False
+
+
+_HOOK_INPUT_CACHE: dict[str, Any] = {
+    "path": "",
+    "mtime_ns": -1,
+    "size": -1,
+    "records": [],
+    "by_session": {},
+    "by_path": {},
+    "calls": 0,
+    "last": "—",
+}
+
+
+def _build_hook_input_index(records: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    by_session: dict[str, list[dict[str, Any]]] = {}
+    by_path: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        sid = str(record.get("session_id") or "")
+        if sid:
+            by_session.setdefault(sid, []).append(record)
+        tpath = str(record.get("transcript_path") or "")
+        if tpath:
+            by_path.setdefault(tpath, []).append(record)
+    return by_session, by_path
+
+
+def _load_hook_model_inputs_cached() -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    path = settings.tracebook_home / "hooks.jsonl"
+    if not path.exists():
+        _HOOK_INPUT_CACHE["path"] = ""
+        _HOOK_INPUT_CACHE["mtime_ns"] = -1
+        _HOOK_INPUT_CACHE["size"] = -1
+        _HOOK_INPUT_CACHE["records"] = []
+        _HOOK_INPUT_CACHE["by_session"] = {}
+        _HOOK_INPUT_CACHE["by_path"] = {}
+        _HOOK_INPUT_CACHE["calls"] = 0
+        _HOOK_INPUT_CACHE["last"] = "—"
+        return [], {}, {}
+
+    try:
+        stats = path.stat()
+    except OSError:
+        return [], {}, {}
+
+    if (
+        _HOOK_INPUT_CACHE["path"] == str(path)
+        and _HOOK_INPUT_CACHE["mtime_ns"] == stats.st_mtime_ns
+        and _HOOK_INPUT_CACHE["size"] == stats.st_size
+    ):
+        return _HOOK_INPUT_CACHE["records"], _HOOK_INPUT_CACHE["by_session"], _HOOK_INPUT_CACHE["by_path"]
+
+    records: list[dict[str, Any]] = []
+    hook_calls = 0
+    hook_last = "—"
+    try:
+        with path.open(encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.strip():
+                    continue
+                hook_calls += 1
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                captured_at = str(record.get("captured_at", "") or "")
+                if captured_at:
+                    hook_last = captured_at
+                if (
+                    isinstance(record, dict)
+                    and "model_input" in record
+                ):
+                    records.append(record)
+    except OSError:
+        return [], {}, {}
+
+    by_session, by_path = _build_hook_input_index(records)
+    _HOOK_INPUT_CACHE["path"] = str(path)
+    _HOOK_INPUT_CACHE["mtime_ns"] = stats.st_mtime_ns
+    _HOOK_INPUT_CACHE["size"] = stats.st_size
+    _HOOK_INPUT_CACHE["records"] = records
+    _HOOK_INPUT_CACHE["by_session"] = by_session
+    _HOOK_INPUT_CACHE["by_path"] = by_path
+    _HOOK_INPUT_CACHE["calls"] = hook_calls
+    _HOOK_INPUT_CACHE["last"] = hook_last
+    return records, by_session, by_path
+
+
+def _load_hook_model_inputs(s: Session) -> list[dict[str, Any]]:
+    all_records, by_session, by_path = _load_hook_model_inputs_cached()
+    if not all_records:
+        return []
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    for key in (s.id, s.short):
+        if key and key in by_session:
+            for record in by_session[key]:
+                rid = id(record)
+                if rid in seen:
+                    continue
+                seen.add(rid)
+                candidates.append(record)
+
+    transcript_path = str(s.path)
+    for record in by_path.get(transcript_path, []):
+        rid = id(record)
+        if rid in seen:
+            continue
+        seen.add(rid)
+        candidates.append(record)
+
+    if not candidates:
+        for record in all_records:
+            if _hook_matches_session(record, s):
+                candidates.append(record)
+        return candidates
+
+    return [record for record in candidates if _hook_matches_session(record, s)]
+
+
+def _attach_hook_model_inputs(s: Session, nodes: list[dict[str, Any]]) -> None:
+    hook_inputs = _load_hook_model_inputs(s)
+    if not hook_inputs:
+        return
+    llm_nodes = [node for node in nodes if node.get("type") == "llm"]
+    if not llm_nodes:
+        return
+    for idx, record in enumerate(hook_inputs):
+        node = llm_nodes[min(idx, len(llm_nodes) - 1)]
+        detail = node.setdefault("detail", {})
+        previous_input = detail.get("input") or {}
+        detail["input"] = {
+            "source": "hook_exact",
+            "capture": "exact_model_request",
+            "captured_at": record.get("captured_at", ""),
+            "event": record.get("event", ""),
+            "request_id": record.get("request_id", ""),
+            "model": record.get("model", ""),
+            "payload": record.get("model_input"),
+            "log_replay_fallback": previous_input,
+        }
+        attrs = detail.setdefault("attributes", {})
+        attrs["input_source"] = "hook_exact"
+        attrs["hook_capture_event"] = record.get("event", "")
 
 
 def _node_dict(n: TraceNode) -> dict:
@@ -497,9 +725,67 @@ def _build_context_budget(s: Session) -> dict:
     }
 
 
+def _trace_interval_duration(
+    nodes: list[TraceNode],
+    wall_ms: int,
+    allowed_types: set[str],
+    *,
+    skip_visual_noise: bool = False,
+) -> int:
+    """Return non-overlapping duration for trace nodes, clipped to the run wall time."""
+    if wall_ms <= 0:
+        return 0
+    intervals: list[tuple[int, int]] = []
+    for node in nodes:
+        if _trace_node_is_noise(node):
+            continue
+        if skip_visual_noise and _trace_node_is_visual_noise(node):
+            continue
+        if node.type not in allowed_types:
+            continue
+        start = max(0, min(wall_ms, int(node.start or 0)))
+        end = max(start, min(wall_ms, start + int(node.duration or 0)))
+        if end > start:
+            intervals.append((start, end))
+    if not intervals:
+        return 0
+    intervals.sort()
+    total = 0
+    cur_start, cur_end = intervals[0]
+    for start, end in intervals[1:]:
+        if start <= cur_end:
+            cur_end = max(cur_end, end)
+            continue
+        total += cur_end - cur_start
+        cur_start, cur_end = start, end
+    total += cur_end - cur_start
+    return total
+
+
+def _session_active_duration_ms(s: Session) -> int:
+    """Non-overlapping time where model or tools were actively running."""
+    wall_ms = s.trace_nodes[0].duration if s.trace_nodes else 0
+    return _trace_interval_duration(
+        s.trace_nodes,
+        wall_ms,
+        {"llm", "tool", "mcp", "skill"},
+        skip_visual_noise=True,
+    )
+
+
+def _trace_node_is_noise(n: TraceNode) -> bool:
+    return bool((n.attributes or {}).get("noise"))
+
+
+def _trace_node_is_visual_noise(n: TraceNode) -> bool:
+    attrs = n.attributes or {}
+    return bool(attrs.get("noise") or attrs.get("visual_noise"))
+
+
 def _trace_summary(s: Session) -> dict:
-    nodes = s.trace_nodes
-    llm = [n for n in nodes if n.type == "llm"]
+    nodes = [n for n in s.trace_nodes if not _trace_node_is_noise(n)]
+    visible_nodes = [n for n in nodes if not _trace_node_is_visual_noise(n)]
+    llm = [n for n in visible_nodes if n.type == "llm"]
     tools = [n for n in nodes if n.type in {"tool", "mcp", "skill"}]
     tool_counts: dict[str, int] = {}
     failed_tools = 0
@@ -515,8 +801,8 @@ def _trace_summary(s: Session) -> dict:
         if longest_tool is None or n.duration > longest_tool.duration:
             longest_tool = n
     wall_ms = s.trace_nodes[0].duration if s.trace_nodes else 0
-    model_ms = sum(n.duration for n in llm)
-    tool_ms = sum(n.duration for n in tools)
+    model_ms = _trace_interval_duration(s.trace_nodes, wall_ms, {"llm"}, skip_visual_noise=True)
+    tool_ms = _trace_interval_duration(s.trace_nodes, wall_ms, {"tool", "mcp", "skill"})
     input_side = s.tokens_in + s.cache_write + s.cache_read
     cache_hit = s.cache_read / input_side if input_side else 0
     minutes = max(wall_ms / 60000, 1 / 60)
@@ -795,22 +1081,11 @@ def _hook_log_stats() -> dict:
     path = settings.tracebook_home / "hooks.jsonl"
     if not path.exists():
         return {"calls": 0, "last": "—"}
-    calls = 0
-    last = "—"
-    try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
-                calls += 1
-                try:
-                    data = json.loads(line)
-                    last = data.get("captured_at") or last
-                except json.JSONDecodeError:
-                    pass
-    except OSError:
-        return {"calls": 0, "last": "—"}
-    return {"calls": calls, "last": last}
+    _load_hook_model_inputs_cached()
+    return {
+        "calls": int(_HOOK_INPUT_CACHE["calls"]),
+        "last": str(_HOOK_INPUT_CACHE["last"]),
+    }
 
 
 def _detect_mcp_servers() -> list[dict]:

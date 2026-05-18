@@ -209,6 +209,53 @@ def _tool_name(block: dict) -> str:
     return block.get("name", block.get("tool_name", "?"))
 
 
+def _message_role_for_event(ev: dict[str, Any]) -> str:
+    msg = ev.get("message") or {}
+    return msg.get("role") or ev.get("type") or "message"
+
+
+def _model_input_from_claude_events(
+    events: list[dict[str, Any]],
+    assistant_index: int,
+    model: str,
+    usage: dict[str, Any],
+) -> dict[str, Any]:
+    messages: list[dict[str, Any]] = []
+    system: list[Any] = []
+    summaries: list[Any] = []
+    for ev in events[:assistant_index]:
+        ev_type = ev.get("type")
+        if ev_type == "system":
+            system.append(_safe_payload(ev.get("content") or ev.get("message") or ev, max_string=80_000, max_items=160))
+            continue
+        if ev_type == "summary":
+            summaries.append(_safe_payload(ev.get("summary") or ev.get("message") or ev, max_string=80_000, max_items=160))
+            continue
+        if ev_type not in {"user", "assistant"}:
+            continue
+        msg = ev.get("message") or {}
+        content = msg.get("content", "")
+        if not content:
+            continue
+        messages.append({
+            "role": _message_role_for_event(ev),
+            "timestamp": ev.get("timestamp", ""),
+            "content": _safe_payload(content, max_string=80_000, max_items=200),
+        })
+    return {
+        "source": "log_replay",
+        "capture": "reconstructed_before_model",
+        "model": model,
+        "system": system,
+        "summaries": summaries,
+        "messages": messages,
+        "input_tokens": usage.get("input_tokens", 0),
+        "cache_write_tokens": _cache_write_tokens(usage),
+        "cache_read_tokens": usage.get("cache_read_input_tokens", 0),
+        "note": "Reconstructed by walking transcript events before this assistant/model event. Hook capture replaces this with the exact model request when available.",
+    }
+
+
 def _relative_time(dt: Optional[datetime], now: datetime) -> str:
     if dt is None:
         return "?"
@@ -267,6 +314,56 @@ def _append_transcript(rows: list[dict[str, Any]], role: str, text: str, ts: str
             return False
     rows.append({"role": role, "text": text, "ts": ts, **extra})
     return True
+
+
+def _event_ts(ev: dict[str, Any]) -> Optional[datetime]:
+    ts = ev.get("timestamp")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _tool_result_output_text(block: dict[str, Any]) -> str:
+    content = block.get("content", "")
+    if isinstance(content, list):
+        return _clean_full(
+            "\n\n".join(
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict) and item.get("type") == "text"
+            ),
+            max_chars=12_000,
+        )
+    if isinstance(content, str):
+        return _clean_full(content, max_chars=12_000)
+    return _clean_full(content, max_chars=12_000)
+
+
+def _collect_tool_results(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    results: dict[str, dict[str, Any]] = {}
+    for ev in events:
+        if ev.get("type") != "user":
+            continue
+        content = (ev.get("message") or {}).get("content", "")
+        if not isinstance(content, list):
+            continue
+        ev_ts = _event_ts(ev)
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            tid = block.get("tool_use_id", "")
+            if not tid:
+                continue
+            output_text = _tool_result_output_text(block)
+            results[tid] = {
+                "ts": ev_ts,
+                "output": _clean(output_text),
+                "raw_output": _safe_payload(output_text, max_string=12_000),
+            }
+    return results
 
 
 def _extract_skill_names(text: str) -> list[str]:
@@ -332,7 +429,12 @@ def _is_live(last_at: Optional[datetime], path: Path, pending_tools: dict[str, d
 
 # ─── Main parser ──────────────────────────────────────────────────────────────
 
-def parse_session(path: Path) -> Optional[Session]:
+def parse_session(
+    path: Path,
+    *,
+    include_transcript: bool = True,
+    include_trace: bool = False,
+) -> Optional[Session]:
     events: list[dict] = []
     try:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -399,6 +501,7 @@ def parse_session(path: Path) -> Optional[Session]:
     # Track pending tool_use blocks waiting for tool_result
     pending_tools: dict[str, dict] = {}  # tool_use_id → {name, input, ts_idx}
     transcript_tools: dict[str, dict[str, Any]] = {}
+    known_tool_results = _collect_tool_results(events) if include_transcript else {}
     turn_start_idx = 0
 
     for idx, ev in enumerate(events):
@@ -418,7 +521,7 @@ def parse_session(path: Path) -> Optional[Session]:
             msg = ev.get("message", {})
             content = msg.get("content", "")
             is_meta = ev.get("isMeta", False)
-            text = _content_text_full(content)
+            text = _content_text_full(content) if include_transcript else _content_text(content)
             # only use non-meta, non-tool-result text as preview
             is_tool_result = isinstance(content, list) and any(
                 isinstance(b, dict) and b.get("type") == "tool_result" for b in content
@@ -427,21 +530,13 @@ def parse_session(path: Path) -> Optional[Session]:
                 preview = _clean(text)
 
             # collect tool results
-            if isinstance(content, list):
+            if isinstance(content, list) and include_transcript:
                 for block in content:
                     if isinstance(block, dict) and block.get("type") == "tool_result":
                         tid = block.get("tool_use_id", "")
                         if tid in pending_tools:
                             info = pending_tools.pop(tid)
-                            output_text = ""
-                            bc = block.get("content", "")
-                            if isinstance(bc, list):
-                                output_text = _clean_full(
-                                    "\n\n".join(b.get("text","") for b in bc if isinstance(b,dict) and b.get("type")=="text"),
-                                    max_chars=12_000,
-                                )
-                            elif isinstance(bc, str):
-                                output_text = _clean_full(bc, max_chars=12_000)
+                            output_text = _tool_result_output_text(block)
                             tc = ToolCall(
                                 name=info["name"],
                                 input_preview=info.get("input_preview",""),
@@ -458,7 +553,7 @@ def parse_session(path: Path) -> Optional[Session]:
                                     "outputPreview": _clean(output_text),
                                 })
 
-            if text:
+            if text and include_transcript:
                 _append_transcript(transcript_turns, "user", text, ts_str or "", kind="message")
             turns += 1
 
@@ -503,7 +598,8 @@ def parse_session(path: Path) -> Optional[Session]:
                     continue
                 btype = block.get("type")
                 if btype in ("text", "thinking"):
-                    text_parts.append(block.get("text", "")[:300])
+                    if include_transcript:
+                        text_parts.append(block.get("text", "")[:300])
                 elif btype == "tool_use":
                     tid = block.get("id", f"tu_{idx}")
                     tool_name = _tool_name(block)
@@ -520,79 +616,100 @@ def parse_session(path: Path) -> Optional[Session]:
                             inp_preview = str(first_val)[:100]
                     info = tool_info("anthropic", tool_name, inp)
                     compact_input = compact_tool_input(tool_name, inp)
-                    pending_tools[tid] = {"name": tool_name, "input_preview": inp_preview, "ts_idx": idx}
-                    tool_row = {
-                        "role": "tool",
-                        "kind": "tool",
-                        "ts": ts_str or "",
-                        "name": info["label"],
-                        "rawName": tool_name,
-                        "category": info["category"],
-                        "provider": "anthropic",
-                        "text": info["context"] or inp_preview or tool_name,
-                        "input": _safe_payload(compact_input, max_string=12_000),
-                        "toolInfo": info,
-                        "status": "pending",
-                    }
-                    transcript_turns.append(tool_row)
-                    transcript_tools[tid] = tool_row
+                    known_result = known_tool_results.get(tid)
+                    if known_result:
+                        tool_calls.append(ToolCall(
+                            name=tool_name,
+                            input_preview=inp_preview,
+                            output_preview=known_result.get("output", ""),
+                            duration_ms=0,
+                            tokens=0,
+                        ))
+                    else:
+                        pending_tools[tid] = {"name": tool_name, "input_preview": inp_preview, "ts_idx": idx}
+                    if include_transcript:
+                        tool_row = {
+                            "role": "tool",
+                            "kind": "tool",
+                            "ts": ts_str or "",
+                            "name": info["label"],
+                            "rawName": tool_name,
+                            "callId": tid,
+                            "category": info["category"],
+                            "provider": "anthropic",
+                            "text": info["context"] or inp_preview or tool_name,
+                            "input": _safe_payload(compact_input, max_string=12_000),
+                            "toolInfo": info,
+                            "status": "completed" if known_result else "pending",
+                        }
+                        if known_result:
+                            tool_row.update({
+                                "output": known_result.get("raw_output", ""),
+                                "outputPreview": known_result.get("output", ""),
+                            })
+                        transcript_turns.append(tool_row)
+                        transcript_tools[tid] = tool_row
                     last_action = tool_name
 
-                    # ── classify: sub-agent / skill / MCP ─────────────────────
-                    if tool_name == "Task" and isinstance(inp, dict):
-                        sa = inp.get("subagent_type") or "general-purpose"
-                        if sa not in seen_subagent_keys:
-                            seen_subagent_keys.add(sa)
-                            sub_agents.append({"name": sa, "calls": 1, "description": (inp.get("description") or "")[:80]})
-                        else:
-                            for s in sub_agents:
-                                if s["name"] == sa:
-                                    s["calls"] = s.get("calls", 0) + 1
-                                    break
-                    elif tool_name == "Skill" and isinstance(inp, dict):
-                        sk = inp.get("skill") or inp.get("name") or "?"
-                        if sk not in seen_skill_keys:
-                            seen_skill_keys.add(sk)
-                            skills_used.append({"name": sk, "calls": 1})
-                        else:
-                            for s in skills_used:
-                                if s["name"] == sk:
-                                    s["calls"] = s.get("calls", 0) + 1
-                                    break
-                    elif tool_name.startswith("mcp__"):
-                        # mcp__servername__toolname → group by server
-                        parts = tool_name.split("__", 2)
-                        server = parts[1] if len(parts) >= 2 else "?"
-                        if server not in seen_mcp_keys:
-                            seen_mcp_keys.add(server)
-                            mcp_tools_used.append({"name": server, "calls": 1, "tools": {tool_name}})
-                        else:
-                            for s in mcp_tools_used:
-                                if s["name"] == server:
-                                    s["calls"] = s.get("calls", 0) + 1
-                                    s["tools"].add(tool_name)
-                                    break
+                    if include_transcript:
+                        # ── classify: sub-agent / skill / MCP ─────────────────────
+                        if tool_name == "Task" and isinstance(inp, dict):
+                            sa = inp.get("subagent_type") or "general-purpose"
+                            if sa not in seen_subagent_keys:
+                                seen_subagent_keys.add(sa)
+                                sub_agents.append({"name": sa, "calls": 1, "description": (inp.get("description") or "")[:80]})
+                            else:
+                                for s in sub_agents:
+                                    if s["name"] == sa:
+                                        s["calls"] = s.get("calls", 0) + 1
+                                        break
+                        elif tool_name == "Skill" and isinstance(inp, dict):
+                            sk = inp.get("skill") or inp.get("name") or "?"
+                            if sk not in seen_skill_keys:
+                                seen_skill_keys.add(sk)
+                                skills_used.append({"name": sk, "calls": 1})
+                            else:
+                                for s in skills_used:
+                                    if s["name"] == sk:
+                                        s["calls"] = s.get("calls", 0) + 1
+                                        break
+                        elif tool_name.startswith("mcp__"):
+                            # mcp__servername__toolname → group by server
+                            parts = tool_name.split("__", 2)
+                            server = parts[1] if len(parts) >= 2 else "?"
+                            if server not in seen_mcp_keys:
+                                seen_mcp_keys.add(server)
+                                mcp_tools_used.append({"name": server, "calls": 1, "tools": {tool_name}})
+                            else:
+                                for s in mcp_tools_used:
+                                    if s["name"] == server:
+                                        s["calls"] = s.get("calls", 0) + 1
+                                        s["tools"].add(tool_name)
+                                        break
 
-                    # ── detect memory reads (CLAUDE.md or .claude/ memory files) ─
-                    if tool_name == "Read" and isinstance(inp, dict):
-                        fp = str(inp.get("file_path", ""))
-                        if ("CLAUDE.md" in fp or "/.claude/" in fp or "/memory/" in fp) and fp not in memory_reads:
-                            memory_reads.append(fp)
+                    if include_transcript:
+                        # ── detect memory reads (CLAUDE.md or .claude/ memory files) ─
+                        if tool_name == "Read" and isinstance(inp, dict):
+                            fp = str(inp.get("file_path", ""))
+                            if ("CLAUDE.md" in fp or "/.claude/" in fp or "/memory/" in fp) and fp not in memory_reads:
+                                memory_reads.append(fp)
 
             if text_parts:
                 text = _clean_full("\n\n".join(text_parts), max_chars=40_000)
-                _append_transcript(transcript_turns, "assistant", text, ts_str or "", kind="message")
-                for skill in _extract_skill_names(text):
-                    _bump_named(skills_used, skill, source="message")
+                if include_transcript:
+                    _append_transcript(transcript_turns, "assistant", text, ts_str or "", kind="message")
+                    for skill in _extract_skill_names(text):
+                        _bump_named(skills_used, skill, source="message")
         elif ev_type == "summary":
             compressions += 1
-            summary = _clean_full(ev.get("summary") or ev.get("message") or "conversation compressed", max_chars=12_000)
-            transcript_turns.append({
-                "role": "system",
-                "kind": "compression",
-                "text": summary or "conversation compressed",
-                "ts": ts_str or "",
-            })
+            if include_transcript:
+                summary = _clean_full(ev.get("summary") or ev.get("message") or "conversation compressed", max_chars=12_000)
+                transcript_turns.append({
+                    "role": "system",
+                    "kind": "compression",
+                    "text": summary or "conversation compressed",
+                    "ts": ts_str or "",
+                })
 
     # ── Determine dominant model, live status ────────────────────────────────
     model = max(model_counts, key=model_counts.get) if model_counts else ""
@@ -616,7 +733,7 @@ def parse_session(path: Path) -> Optional[Session]:
 
     # ── Build trace nodes ────────────────────────────────────────────────────
     # Produce one assistant node per turn, children = tool calls in that turn
-    trace_nodes = _build_trace(events, model)
+    trace_nodes = _build_trace(events, model) if include_trace else []
 
     # serialize mcp tools set → count for JSON
     for s in mcp_tools_used:
@@ -730,7 +847,7 @@ def _build_trace(events: list[dict], dominant_model: str) -> list[TraceNode]:
     node_idx = 0
     turn_offset = 0
 
-    for ev in events:
+    for ev_idx, ev in enumerate(events):
         if ev.get("type") != "assistant":
             continue
 
@@ -776,12 +893,7 @@ def _build_trace(events: list[dict], dominant_model: str) -> list[TraceNode]:
             cache_write=cache_write,
             cache_read=cache_read,
             status=stop_reason or "completed",
-            input_payload={
-                "model": model,
-                "input_tokens": input_tokens,
-                "cache_write_tokens": cache_write,
-                "cache_read_tokens": cache_read,
-            },
+            input_payload=_model_input_from_claude_events(events, ev_idx, model, usage),
             output_payload={
                 "text": text_preview,
                 "output_tokens": out,
