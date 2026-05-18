@@ -92,12 +92,38 @@ tracebook/
     ├── settings.py       paths, port
     ├── pricing.py        model cost table
     ├── watcher.py        watchdog observer
-    ├── parsers/claude.py Claude Code JSONL → typed Session
+    ├── parsers/
+    │   ├── claude.py    Claude Code JSONL → typed Session
     ├── templates/        Jinja2 shell template
     └── static/           CSS + JSX assets
 ```
 
+## Visual Tour
+
+### Dashboard
+
+![Dashboard overview](figures/dashboard.png)
+
+### Sessions
+
+![Sessions list](figures/sessions.png)
+
+### Session Trace
+
+![Session trace view](figures/sessions-trace.png)
+
+### Session Context
+
+![Session context view](figures/sessions-context.png)
+
+### Session Transcript
+
+![Session transcript view](figures/sessions-transcript.png)
+
+### Settings
+
+![Settings](figures/settings.png)
+
 ## License
 
 Apache 2.0.
-# ml-sandbox
