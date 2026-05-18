@@ -592,15 +592,20 @@ def _mark_visual_noise_steps(nodes: list[TraceNode]) -> None:
         node.attributes["visual_noise_reason"] = "empty_pty_poll"
 
 
-def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: bool = False) -> Optional[Session]:
+def parse_session(
+    path: Path,
+    *,
+    include_trace: bool = False,
+    include_transcript: bool = True,
+    embed_subagents: bool = False,
+) -> Optional[Session]:
     events = _load_codex_events(path)
 
     if not events:
         return None
-    if _is_codex_subagent_session(events):
-        return None
 
     meta: dict[str, Any] = {}
+    session_meta_ids: list[str] = []
     cwd = ""
     model_counts: dict[str, int] = {}
     started_at: Optional[datetime] = None
@@ -625,7 +630,7 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
     memory_reads: list[str] = []
     compacted_events = 0
     context_compacted_events = 0
-    pty_final_statuses = _pty_final_statuses(events)
+    pty_final_statuses = _pty_final_statuses(events) if (include_transcript or include_trace) else {}
 
     for ev in events:
         ts = _ts(ev.get("timestamp"))
@@ -640,28 +645,36 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
         if typ == "compacted":
             compacted_events += 1
             replacement = payload.get("replacement_history") or []
-            transcript.append({
-                "role": "system",
-                "kind": "compression",
-                "text": "conversation compressed",
-                "ts": ev.get("timestamp", ""),
-                "items": len(replacement) if isinstance(replacement, list) else 0,
-            })
+            if include_transcript:
+                transcript.append({
+                    "role": "system",
+                    "kind": "compression",
+                    "text": "conversation compressed",
+                    "ts": ev.get("timestamp", ""),
+                    "items": len(replacement) if isinstance(replacement, list) else 0,
+                })
             continue
 
         if typ == "session_meta":
             if not meta:
                 meta = payload
             cwd = payload.get("cwd") or cwd
+            session_sid = str(payload.get("id") or "")
+            if session_sid:
+                if session_meta_ids and session_sid != session_meta_ids[0]:
+                    return None
+                if not session_meta_ids:
+                    session_meta_ids.append(session_sid)
             # Codex session_meta.timestamp is the session allocation time and can
             # predate the first transcript event. Keep started_at on the JSONL
             # event timeline so user markers and trace nodes share one origin.
-            for field in ("base_instructions", "developer_instructions", "user_instructions"):
-                value = payload.get(field)
-                if isinstance(value, dict):
-                    value = value.get("text") or ""
-                for skill in _extract_skill_names(str(value or "")):
-                    _bump_named(skills_used, skill, source="prompt")
+            if include_transcript:
+                for field in ("base_instructions", "developer_instructions", "user_instructions"):
+                    value = payload.get(field)
+                    if isinstance(value, dict):
+                        value = value.get("text") or ""
+                    for skill in _extract_skill_names(str(value or "")):
+                        _bump_named(skills_used, skill, source="prompt")
             continue
 
         if typ == "turn_context":
@@ -671,28 +684,33 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
                 model_counts[model] = model_counts.get(model, 0) + 1
             context_max = max(context_max, int(payload.get("model_context_window") or 0))
             instructions = payload.get("user_instructions") or ""
-            for skill in _extract_skill_names(instructions):
-                _bump_named(skills_used, skill, source="prompt")
-            if "AGENTS.md" in instructions and "AGENTS.md" not in memory_reads:
-                memory_reads.append("AGENTS.md")
-            if "CLAUDE.md" in instructions and "CLAUDE.md" not in memory_reads:
-                memory_reads.append("CLAUDE.md")
+            if include_transcript:
+                for skill in _extract_skill_names(instructions):
+                    _bump_named(skills_used, skill, source="prompt")
+                if "AGENTS.md" in instructions and "AGENTS.md" not in memory_reads:
+                    memory_reads.append("AGENTS.md")
+                if "CLAUDE.md" in instructions and "CLAUDE.md" not in memory_reads:
+                    memory_reads.append("CLAUDE.md")
             continue
 
         if typ == "event_msg":
             ptype = payload.get("type")
             if ptype == "user_message":
-                text = _clean_full(payload.get("message") or "")
+                raw_message = payload.get("message") or ""
+                text = _clean_full(raw_message) if include_transcript else _clean(raw_message)
                 if text and not _is_meta_text(text):
                     preview = preview or _clean(text)
-                    if _append_transcript(transcript, "user", text, ev.get("timestamp", ""), kind="message"):
+                    if include_transcript and _append_transcript(transcript, "user", text, ev.get("timestamp", ""), kind="message"):
+                        turns += 1
+                    elif not include_transcript:
                         turns += 1
             elif ptype == "agent_message":
-                text = _clean_full(payload.get("message") or "")
-                if text:
-                    _append_transcript(transcript, "assistant", text, ev.get("timestamp", ""), kind="message")
-                    for skill in _extract_skill_names(text):
-                        _bump_named(skills_used, skill, source="message")
+                if include_transcript:
+                    text = _clean_full(payload.get("message") or "")
+                    if text:
+                        _append_transcript(transcript, "assistant", text, ev.get("timestamp", ""), kind="message")
+                        for skill in _extract_skill_names(text):
+                            _bump_named(skills_used, skill, source="message")
             elif ptype == "token_count":
                 info = payload.get("info") or {}
                 total_usage = info.get("total_token_usage") or {}
@@ -713,7 +731,7 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
                 thread_name = payload.get("thread_name") or thread_name
             elif ptype == "context_compacted":
                 context_compacted_events += 1
-                if not transcript or transcript[-1].get("kind") != "compression":
+                if include_transcript and (not transcript or transcript[-1].get("kind") != "compression"):
                     transcript.append({
                         "role": "system",
                         "kind": "compression",
@@ -727,88 +745,95 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
             if rtype == "message":
                 role = payload.get("role")
                 content = payload.get("content")
-                raw_text = _raw_content_text(content)
-                text = _content_text_full(content)
+                raw_text = _raw_content_text(content) if include_transcript else ""
+                text = _content_text_full(content) if include_transcript else _content_text(content)
                 if role == "user" and text and not _is_meta_text(text):
                     preview = preview or _clean(text)
-                    if _append_transcript(transcript, role, text, ev.get("timestamp", ""), kind="message"):
+                    if include_transcript and _append_transcript(transcript, role, text, ev.get("timestamp", ""), kind="message"):
+                        turns += 1
+                    elif not include_transcript:
                         turns += 1
                 if role in ("user", "assistant") and text and not (role == "user" and _is_meta_text(text)):
-                    _append_transcript(transcript, role, text, ev.get("timestamp", ""), kind="message")
-                    if role == "assistant":
-                        for skill in _extract_skill_names(text):
-                            _bump_named(skills_used, skill, source="message")
+                    if include_transcript:
+                        _append_transcript(transcript, role, text, ev.get("timestamp", ""), kind="message")
+                        if role == "assistant":
+                            for skill in _extract_skill_names(text):
+                                _bump_named(skills_used, skill, source="message")
                 elif role in ("developer", "system") and raw_text:
-                    for skill in _extract_skill_names(raw_text):
-                        _bump_named(skills_used, skill, source="context")
+                    if include_transcript:
+                        for skill in _extract_skill_names(raw_text):
+                            _bump_named(skills_used, skill, source="context")
             elif rtype in ("function_call", "custom_tool_call"):
                 name = _clean(payload.get("name") or "tool")
                 call_id = payload.get("call_id") or payload.get("id") or f"call_{len(tool_calls)}"
-                raw_input = payload.get("arguments") or payload.get("input") or ""
-                parsed_input = _jsonish(raw_input)
-                tool = ToolCall(name=name, input_preview=_preview_from_payload(raw_input))
-                calls_by_id[call_id] = tool
-                tool_calls.append(tool)
                 last_action = name
-                info = tool_info("openai", name, parsed_input)
-                compact_input = compact_tool_input(name, parsed_input)
-                tool_row = {
-                    "role": "tool",
-                    "kind": "tool",
-                    "ts": ev.get("timestamp", ""),
-                    "name": info["label"],
-                    "rawName": name,
-                    "category": info["category"],
-                    "provider": "openai",
-                    "callId": call_id,
-                    "text": info["context"] or tool.input_preview or name,
-                    "input": _safe_payload(compact_input, max_string=12_000),
-                    "toolInfo": info,
-                    "status": "pending",
-                    "noise": False,
-                }
-                transcript.append(tool_row)
-                transcript_tools[call_id] = tool_row
-                if name.startswith("mcp__"):
-                    parts = name.split("__", 2)
-                    server = parts[1] if len(parts) > 1 else "mcp"
-                    _bump_named(mcp_tools_used, server, tools=1)
-                if name == "spawn_agent" and isinstance(parsed_input, dict):
-                    _bump_named(sub_agents, parsed_input.get("agent_type") or "default", description=parsed_input.get("message", "")[:80])
-                if name in {"view_image", "read_mcp_resource"} and isinstance(parsed_input, dict):
-                    pathish = str(parsed_input.get("path") or parsed_input.get("uri") or "")
-                    if pathish and pathish not in memory_reads:
-                        memory_reads.append(pathish)
+                if include_transcript:
+                    raw_input = payload.get("arguments") or payload.get("input") or ""
+                    parsed_input = _jsonish(raw_input)
+                    tool = ToolCall(name=name, input_preview=_preview_from_payload(raw_input))
+                    calls_by_id[call_id] = tool
+                    tool_calls.append(tool)
+                    info = tool_info("openai", name, parsed_input)
+                    compact_input = compact_tool_input(name, parsed_input)
+                    tool_row = {
+                        "role": "tool",
+                        "kind": "tool",
+                        "ts": ev.get("timestamp", ""),
+                        "name": info["label"],
+                        "rawName": name,
+                        "category": info["category"],
+                        "provider": "openai",
+                        "callId": call_id,
+                        "text": info["context"] or tool.input_preview or name,
+                        "input": _safe_payload(compact_input, max_string=12_000),
+                        "toolInfo": info,
+                        "status": "pending",
+                        "noise": False,
+                    }
+                    transcript.append(tool_row)
+                    transcript_tools[call_id] = tool_row
+                    if name.startswith("mcp__"):
+                        parts = name.split("__", 2)
+                        server = parts[1] if len(parts) > 1 else "mcp"
+                        _bump_named(mcp_tools_used, server, tools=1)
+                    if name == "spawn_agent" and isinstance(parsed_input, dict):
+                        _bump_named(sub_agents, parsed_input.get("agent_type") or "default", description=parsed_input.get("message", "")[:80])
+                    if name in {"view_image", "read_mcp_resource"} and isinstance(parsed_input, dict):
+                        pathish = str(parsed_input.get("path") or parsed_input.get("uri") or "")
+                        if pathish and pathish not in memory_reads:
+                            memory_reads.append(pathish)
             elif rtype in ("function_call_output", "custom_tool_call_output"):
                 call_id = payload.get("call_id") or payload.get("id") or ""
-                tool = calls_by_id.get(call_id)
-                output_text = _clean_full(payload.get("output") or payload.get("result") or "", max_chars=12_000)
-                if tool:
-                    tool.output_preview = _clean(output_text)
-                if call_id in transcript_tools:
-                    compact_input = transcript_tools[call_id].get("input") or {}
-                    transcript_tools[call_id].update({
-                        "status": _resolved_tool_status(output_text, compact_input, pty_final_statuses),
-                        "output": _safe_payload(output_text, max_string=12_000),
-                        "outputPreview": _clean(output_text),
-                        "noise": _is_empty_poll_tool(transcript_tools[call_id].get("rawName") or "", compact_input, output_text),
-                    })
+                if include_transcript:
+                    tool = calls_by_id.get(call_id)
+                    output_text = _clean_full(payload.get("output") or payload.get("result") or "", max_chars=12_000)
+                    if tool:
+                        tool.output_preview = _clean(output_text)
+                    if call_id in transcript_tools:
+                        compact_input = transcript_tools[call_id].get("input") or {}
+                        transcript_tools[call_id].update({
+                            "status": _resolved_tool_status(output_text, compact_input, pty_final_statuses),
+                            "output": _safe_payload(output_text, max_string=12_000),
+                            "outputPreview": _clean(output_text),
+                            "noise": _is_empty_poll_tool(transcript_tools[call_id].get("rawName") or "", compact_input, output_text),
+                        })
             elif rtype == "web_search_call":
                 action = payload.get("action") or {}
                 info = tool_info("openai", "web_search_call", action)
-                transcript.append({
-                    "role": "tool",
-                    "kind": "tool",
-                    "ts": ev.get("timestamp", ""),
-                    "name": info["label"],
-                    "rawName": "web_search_call",
-                    "category": info["category"],
-                    "provider": "openai",
-                    "text": info["context"] or "web search",
-                    "input": _safe_payload(compact_tool_input("web_search_call", action), max_string=12_000),
-                    "toolInfo": info,
-                    "status": payload.get("status") or "completed",
-                })
+                if include_transcript:
+                    transcript.append({
+                        "role": "tool",
+                        "kind": "tool",
+                        "ts": ev.get("timestamp", ""),
+                        "name": info["label"],
+                        "rawName": "web_search_call",
+                        "category": info["category"],
+                        "provider": "openai",
+                        "text": info["context"] or "web search",
+                        "input": _safe_payload(compact_tool_input("web_search_call", action), max_string=12_000),
+                        "toolInfo": info,
+                        "status": payload.get("status") or "completed",
+                    })
 
     session_id = meta.get("id") or path.stem.removeprefix("rollout-")
     model = max(model_counts, key=model_counts.get) if model_counts else "gpt-5.3-codex"
@@ -821,7 +846,18 @@ def parse_session(path: Path, *, include_trace: bool = False, embed_subagents: b
     except OSError:
         pass
 
-    trace_nodes = _build_trace(events, model, path=path, visited={path.resolve()}, embed_subagents=embed_subagents) if include_trace else []
+    trace_nodes = (
+        _build_trace(
+            events,
+            model,
+            path=path,
+            session_id=(session_meta_ids[0] if session_meta_ids else None),
+            visited={path.resolve()},
+            embed_subagents=embed_subagents,
+        )
+        if include_trace
+        else []
+    )
     if trace_nodes:
         tokens_in = trace_nodes[0].input_tokens
         tokens_out = trace_nodes[0].output_tokens
@@ -870,6 +906,7 @@ def _build_trace(
     model: str,
     *,
     path: Optional[Path] = None,
+    session_id: str | None = None,
     visited: Optional[set[Path]] = None,
     initial_usage_signature: Optional[tuple[int, int, int, int, int]] = None,
     embed_subagents: bool = False,
@@ -905,7 +942,7 @@ def _build_trace(
         output_payload={"status": "completed"},
         attributes={
             "events": len(events),
-            "session_id": (_codex_session_meta_ids(events) or [""])[0],
+            "session_id": session_id or (_codex_session_meta_ids(events) or [""])[0],
             "path": str(path or ""),
         },
     )

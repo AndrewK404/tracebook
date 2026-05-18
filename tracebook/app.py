@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tomllib
+import threading
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Optional
@@ -16,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 
 from tracebook import __version__
-from tracebook.parsers.claude import Session, TraceNode
+from tracebook.parsers.claude import Session, TraceNode, parse_session as parse_claude_session
 from tracebook.parsers.codex import parse_session as parse_codex_session
 from tracebook.pricing import PRICING
 from tracebook.settings import settings
@@ -24,6 +25,8 @@ from tracebook.store import store
 
 app = FastAPI(title="tracebook", version=__version__)
 APP_STARTED_AT = datetime.now(tz=timezone.utc)
+_SESSION_DETAIL_CACHE: dict[str, tuple[int, Session]] = {}
+_SESSION_DETAIL_CACHE_LOCK = threading.RLock()
 
 
 @app.middleware("http")
@@ -124,15 +127,52 @@ async def api_sessions() -> JSONResponse:
     return JSONResponse([_session_summary(s) for s in sessions])
 
 
+def _load_detailed_session(sess: Session) -> Session:
+    cache_key = str(sess.path)
+    try:
+        mtime = sess.path.stat().st_mtime_ns
+    except OSError:
+        return sess
+
+    with _SESSION_DETAIL_CACHE_LOCK:
+        cached = _SESSION_DETAIL_CACHE.get(cache_key)
+        if cached and cached[0] == mtime and cached[1].id == sess.id:
+            return cached[1]
+
+    if sess.provider == "openai":
+        detailed = parse_codex_session(
+            sess.path,
+            include_trace=True,
+            include_transcript=True,
+            embed_subagents=True,
+        )
+    else:
+        detailed = parse_claude_session(
+            sess.path,
+            include_trace=True,
+            include_transcript=True,
+        )
+
+    if detailed is None:
+        detailed = sess
+    elif detailed.id != sess.id:
+        # Keep summary identity if the source path changed under the hood.
+        detailed = sess
+
+    with _SESSION_DETAIL_CACHE_LOCK:
+        if detailed is not sess:
+            _SESSION_DETAIL_CACHE[cache_key] = (mtime, detailed)
+
+    return detailed
+
+
 @app.get("/api/sessions/{session_id}")
 async def api_session_detail(session_id: str) -> JSONResponse:
     store.refresh()
     sess = store.get_session(session_id)
     if not sess:
         raise HTTPException(404, f"session {session_id!r} not found")
-    if sess.provider == "openai":
-        sess = parse_codex_session(sess.path, include_trace=True, embed_subagents=True) or sess
-    return JSONResponse(_session_detail(sess))
+    return JSONResponse(_session_detail(_load_detailed_session(sess)))
 
 
 @app.get("/api/dashboard")
@@ -383,27 +423,124 @@ def _hook_matches_session(record: dict[str, Any], s: Session) -> bool:
     return False
 
 
-def _load_hook_model_inputs(s: Session) -> list[dict[str, Any]]:
+_HOOK_INPUT_CACHE: dict[str, Any] = {
+    "path": "",
+    "mtime_ns": -1,
+    "size": -1,
+    "records": [],
+    "by_session": {},
+    "by_path": {},
+    "calls": 0,
+    "last": "—",
+}
+
+
+def _build_hook_input_index(records: list[dict[str, Any]]) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    by_session: dict[str, list[dict[str, Any]]] = {}
+    by_path: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        sid = str(record.get("session_id") or "")
+        if sid:
+            by_session.setdefault(sid, []).append(record)
+        tpath = str(record.get("transcript_path") or "")
+        if tpath:
+            by_path.setdefault(tpath, []).append(record)
+    return by_session, by_path
+
+
+def _load_hook_model_inputs_cached() -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
     path = settings.tracebook_home / "hooks.jsonl"
     if not path.exists():
-        return []
-    out: list[dict[str, Any]] = []
+        _HOOK_INPUT_CACHE["path"] = ""
+        _HOOK_INPUT_CACHE["mtime_ns"] = -1
+        _HOOK_INPUT_CACHE["size"] = -1
+        _HOOK_INPUT_CACHE["records"] = []
+        _HOOK_INPUT_CACHE["by_session"] = {}
+        _HOOK_INPUT_CACHE["by_path"] = {}
+        _HOOK_INPUT_CACHE["calls"] = 0
+        _HOOK_INPUT_CACHE["last"] = "—"
+        return [], {}, {}
+
+    try:
+        stats = path.stat()
+    except OSError:
+        return [], {}, {}
+
+    if (
+        _HOOK_INPUT_CACHE["path"] == str(path)
+        and _HOOK_INPUT_CACHE["mtime_ns"] == stats.st_mtime_ns
+        and _HOOK_INPUT_CACHE["size"] == stats.st_size
+    ):
+        return _HOOK_INPUT_CACHE["records"], _HOOK_INPUT_CACHE["by_session"], _HOOK_INPUT_CACHE["by_path"]
+
+    records: list[dict[str, Any]] = []
+    hook_calls = 0
+    hook_last = "—"
     try:
         with path.open(encoding="utf-8", errors="replace") as fh:
             for line in fh:
                 if not line.strip():
                     continue
+                hook_calls += 1
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                if not isinstance(record, dict) or "model_input" not in record:
-                    continue
-                if _hook_matches_session(record, s):
-                    out.append(record)
+                captured_at = str(record.get("captured_at", "") or "")
+                if captured_at:
+                    hook_last = captured_at
+                if (
+                    isinstance(record, dict)
+                    and "model_input" in record
+                ):
+                    records.append(record)
     except OSError:
+        return [], {}, {}
+
+    by_session, by_path = _build_hook_input_index(records)
+    _HOOK_INPUT_CACHE["path"] = str(path)
+    _HOOK_INPUT_CACHE["mtime_ns"] = stats.st_mtime_ns
+    _HOOK_INPUT_CACHE["size"] = stats.st_size
+    _HOOK_INPUT_CACHE["records"] = records
+    _HOOK_INPUT_CACHE["by_session"] = by_session
+    _HOOK_INPUT_CACHE["by_path"] = by_path
+    _HOOK_INPUT_CACHE["calls"] = hook_calls
+    _HOOK_INPUT_CACHE["last"] = hook_last
+    return records, by_session, by_path
+
+
+def _load_hook_model_inputs(s: Session) -> list[dict[str, Any]]:
+    all_records, by_session, by_path = _load_hook_model_inputs_cached()
+    if not all_records:
         return []
-    return sorted(out, key=lambda r: str(r.get("captured_at") or ""))
+
+    candidates: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    for key in (s.id, s.short):
+        if key and key in by_session:
+            for record in by_session[key]:
+                rid = id(record)
+                if rid in seen:
+                    continue
+                seen.add(rid)
+                candidates.append(record)
+
+    transcript_path = str(s.path)
+    for record in by_path.get(transcript_path, []):
+        rid = id(record)
+        if rid in seen:
+            continue
+        seen.add(rid)
+        candidates.append(record)
+
+    if not candidates:
+        for record in all_records:
+            if _hook_matches_session(record, s):
+                candidates.append(record)
+        return candidates
+
+    return [record for record in candidates if _hook_matches_session(record, s)]
 
 
 def _attach_hook_model_inputs(s: Session, nodes: list[dict[str, Any]]) -> None:
@@ -944,22 +1081,11 @@ def _hook_log_stats() -> dict:
     path = settings.tracebook_home / "hooks.jsonl"
     if not path.exists():
         return {"calls": 0, "last": "—"}
-    calls = 0
-    last = "—"
-    try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if not line.strip():
-                    continue
-                calls += 1
-                try:
-                    data = json.loads(line)
-                    last = data.get("captured_at") or last
-                except json.JSONDecodeError:
-                    pass
-    except OSError:
-        return {"calls": 0, "last": "—"}
-    return {"calls": calls, "last": last}
+    _load_hook_model_inputs_cached()
+    return {
+        "calls": int(_HOOK_INPUT_CACHE["calls"]),
+        "last": str(_HOOK_INPUT_CACHE["last"]),
+    }
 
 
 def _detect_mcp_servers() -> list[dict]:
