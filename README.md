@@ -1,27 +1,40 @@
 # tracebook
 
-Local dashboard for Claude Code (and other CLI agents) sessions. Parses the
-JSONL transcripts your agents write to disk and renders a calm, dark-themed
-dashboard with trace inspection and cost analytics.
+Local dashboard for Claude Code (and other CLI agents) sessions.  
+It reads agent session JSONL files and shows them in a fast, readable dashboard.
 
-```
+```bash
 $ uv run tracebook
 tracebook · http://127.0.0.1:4178
 watching ~/.claude/projects · 684 sessions indexed
 ```
 
+## Why this is fast (from start)
+
+Most delay previously came from reparsing large JSONL files on every request.
+Tracebook now works on an index-first model: list endpoints usually return
+from cache, and heavy parsing is only done when data actually changes.
+
+| Metric | Before | Now | Why it helps |
+|---|---:|---:|---|
+| Session list refresh | scans all files each request | incremental dirty-path updates + cached mtimes | usually near-zero work between changes |
+| Session detail response | reparses trace/transcript on each open | cached by file `mtime_ns` | same session opens instantly |
+| Hook lookup in detail view | full `hooks.jsonl` scan per request | cached indices by session/path | constant-time lookup for tool inputs |
+| Refresh frequency | periodic full parse | lazy full resync (~60s) + fast incremental refresh | fewer parser runs, same safety on deletions |
+
+The result is a dashboard that stays responsive even with hundreds of sessions.
+
 ## What it does
 
-- **Discovers** every Claude Code session in `~/.claude/projects/**/*.jsonl`.
-- **Parses** each transcript: user prompts, assistant turns, tool calls, usage
-  tokens, cost — without touching any API.
-- **Aggregates** tokens, cost, cache performance, and per-project breakdowns.
-- **Watches** the filesystem and re-indexes on every write.
-- **Renders** four screens in a beautiful dark dashboard:
-  - Dashboard — KPIs, throughput chart, cache ratio, project pie.
-  - Sessions — filterable list with compact / card / stacked / grouped layouts.
-  - Session detail — call tree, waterfall, context window breakdown, transcript.
-  - Settings — paths, hooks, MCP servers, pricing table.
+- **Discovers** sessions from `~/.claude/projects/**/*.jsonl`.
+- **Parses** user prompts, assistant turns, tool calls, token usage and cost.
+- **Aggregates** tokens, cost, cache stats, and per-project summaries.
+- **Watches** filesystem changes and updates session index.
+- **Renders**:
+  - Dashboard: KPI cards, charts, project pie.
+  - Sessions: searchable/filterable list.
+  - Session detail: tree/waterfall, context, transcript.
+  - Settings: paths, hooks, MCP servers, pricing.
 
 ## What it is not
 
