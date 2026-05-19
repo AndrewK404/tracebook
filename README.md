@@ -9,7 +9,7 @@ tracebook · http://127.0.0.1:4178
 watching ~/.claude/projects · 684 sessions indexed
 ```
 
-![Tracebook overview](figures/tracebook-cover.png)
+![Tracebook overview](figures/dashboard.png)
 
 ## What it does
 
