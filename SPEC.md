@@ -1,11 +1,10 @@
 # tracebook — product spec
 
-Local read-only dashboard for Claude Code (and, later, other CLI agents).
-Parses `~/.claude/projects/**/*.jsonl` and renders the design described in
-`claude-design/Leibniz v0.4.2 redesign.html` and `design.pdf`.
+Local read-only dashboard for Claude Code and Codex CLI sessions.
+Parses local agent session JSONL files and renders them as searchable
+dashboards, traces, context windows, and transcripts.
 
-This is **v0.1** — the first shippable surface. It eventually grows into
-Leibniz; here it is one self-contained product.
+This is **v0.1**: one self-contained local inspection tool.
 
 ## Non-negotiables
 
@@ -20,9 +19,8 @@ Leibniz; here it is one self-contained product.
 
 ## Screens
 
-The four screens are taken directly from `claude-design/`. The HTML/JSX
-files in `claude-design/src/` define every pixel; the server reproduces
-them and supplies real data.
+The app exposes four screens through a small hash-routed React shell. The
+Python server supplies real data through JSON endpoints.
 
 ### 1. Dashboard `#/dashboard`
 
@@ -105,8 +103,8 @@ Session summary:
   "id": "01HXKQ3F8M2P9NTQVZWX4D",
   "short": "01HXKQ3F",
   "preview": "first user-message excerpt",
-  "cwd": "/Users/.../code/leibniz-platform",
-  "project": "leibniz-platform",
+  "cwd": "/Users/.../code/tracebook",
+  "project": "tracebook",
   "branch": "feat/policy-engine",
   "turns": 47,
   "cost": 1.84,
@@ -117,7 +115,7 @@ Session summary:
   "status": "running",
   "provider": "anthropic",
   "model": "claude-sonnet-4-5",
-  "lastAction": "edit leibniz/store.py +12 −3",
+  "lastAction": "edit tracebook/store.py +12 -3",
   "tokensIn": 124180,
   "tokensOut": 32040,
   "cacheWrite": 18420,
@@ -140,7 +138,7 @@ Trace node:
   "depth": 1,
   "parent": "a1",
   "live": false,
-  "preview": "leibniz/store.py +12 −3"
+  "preview": "tracebook/store.py +12 -3"
 }
 ```
 

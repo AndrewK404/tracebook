@@ -12,7 +12,7 @@ function App() {
   }, [route]);
 
   let screen = null;
-  let crumb = [{ label: 'leibniz' }];
+  let crumb = [{ label: 'tracebook' }];
 
   if (route === '/dashboard' || route === '/') {
     screen = <DashboardScreen />;

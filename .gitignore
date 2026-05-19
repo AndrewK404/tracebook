@@ -8,3 +8,7 @@ dist/
 build/
 .pytest_cache/
 uv.lock
+/memory/
+/trace-design-proposals/
+/screenshots-*.png
+/static/

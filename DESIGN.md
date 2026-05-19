@@ -1,6 +1,6 @@
-# Leibniz — Design System
+# tracebook — Design System
 
-The visual source of truth. Built to feel like a precision instrument: dark, dense where it counts, generous where it should breathe. The reference is `cctrace` — same family, slightly more deliberate.
+The visual source of truth. Built to feel like a precision instrument: dark, dense where it counts, generous where it should breathe.
 
 ## Aesthetic
 
@@ -79,13 +79,12 @@ The non-negotiable UX commitment: **every empty state is intentional and instruc
 ```
 ┌──────────────────────────────────────────────────┐
 │                                                  │
-│              ⌀  No memory files yet              │
+│              ⌀  No sessions yet                  │
 │                                                  │
-│   Drop *.md, *.json, or *.txt files into        │
-│   ~/.leibniz/memory/ and they'll show here.     │
+│   Run Claude Code or point TRACEBOOK_CLAUDE_     │
+│   PROJECTS at a directory with session JSONL.    │
 │                                                  │
-│   Your CLI agent reads them via the              │
-│   leibniz-memory MCP server.                     │
+│   Tracebook will index the files read-only.      │
 │                                                  │
 │              [ open in finder ]                  │
 │                                                  │
@@ -134,4 +133,4 @@ Inline SVG, 16px, `stroke-width: 1.5`, `stroke: currentColor`. Source from [Luci
 
 ## Reference
 
-The visual reference is `cctrace` running at `127.0.0.1:4173`. Leibniz inherits its zinc palette, sticky header, KPI-strip pattern, and `font-variant-numeric: tabular-nums` discipline. We extend it with: a richer empty-state pattern, dedicated mono pairing, two-color accent system (emerald + amber/rose), and a 65ch reading width for prose.
+Tracebook uses a zinc palette, sticky header, KPI-strip pattern, and `font-variant-numeric: tabular-nums` discipline. It extends that base with instructive empty states, dedicated mono pairing, a two-color accent system (emerald + amber/rose), and a 65ch reading width for prose.

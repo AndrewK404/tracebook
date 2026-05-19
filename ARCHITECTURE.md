@@ -43,7 +43,7 @@ tracebook/
 ├── templates/
 │   └── index.html     SPA shell — bootstraps the React design
 └── static/
-    ├── css/app.css    extracted from claude-design <style>
+    ├── css/app.css    application styles
     └── js/            JSX modules served by Babel-standalone
         ├── icons.jsx
         ├── primitives.jsx
@@ -60,15 +60,14 @@ tracebook/
 
 ## Why a "React in the browser" shell
 
-The design ships as a self-contained React + Babel + Tailwind-CDN page.
-Reproducing it 1:1 in Jinja2 would lose fidelity and double the work.
+The UI ships as a React + Babel + Tailwind-CDN shell.
+Reproducing it in Jinja2 would lose fidelity and double the work.
 Instead:
 
 - The Python server owns parsing, indexing, and pricing.
 - The browser owns rendering, exactly as drawn in the design.
 - The two communicate over a small JSON API (six endpoints).
-- There is still **no build step**: Babel transpiles JSX in the browser
-  (the same way the design demo runs).
+- There is still **no build step**: Babel transpiles JSX in the browser.
 
 This keeps the design source of truth one-to-one with what ships, while
 keeping the server logic in Python.
@@ -92,8 +91,7 @@ keeping the server logic in Python.
     └── <session-uuid>.jsonl           ← one session per file
 
 ~/.tracebook/                          (tracebook writes — optional)
-├── pricing.json                       ← user override of model pricing (future)
-└── settings.json                      ← user UI preferences (future)
+└── hooks.jsonl                        ← optional hook-capture events
 ```
 
 In v0.1 the only state tracebook needs is in memory; the `~/.tracebook/`
@@ -104,10 +102,3 @@ directory is created lazily and remains empty by default.
 - Port: `127.0.0.1:4178` — fixed in v0.1, override via `TRACEBOOK_PORT`.
 - Claude projects path: `~/.claude/projects/` — override via `TRACEBOOK_CLAUDE_PROJECTS`.
 - All other config is on disk.
-
-## Roadmap (post v0.1)
-
-- v0.2 — server-sent events for live trace updates without polling.
-- v0.3 — Codex / Gemini / Aider CLI adapters.
-- v0.4 — `tracebook-memory` MCP server, exposing user-curated memory files.
-- v1.0 — opt-in SQLite + sqlite-vec for cross-session search.
