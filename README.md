@@ -1,5 +1,3 @@
-![Tracebook overview](figures/tracebook-cover.png)
-
 # tracebook
 
 Local dashboard for Claude Code (and other CLI agents) sessions.  
@@ -10,6 +8,8 @@ $ uv run tracebook
 tracebook · http://127.0.0.1:4178
 watching ~/.claude/projects · 684 sessions indexed
 ```
+
+![Tracebook overview](figures/tracebook-cover.png)
 
 ## What it does
 
