@@ -1,3 +1,5 @@
+![Tracebook overview](figures/tracebook-cover.png)
+
 # tracebook
 
 Local dashboard for Claude Code (and other CLI agents) sessions.  
